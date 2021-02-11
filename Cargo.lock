@@ -78,18 +78,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdb031dd78e28731d87d56cc8ffef4a8f36ca26c38fe2de700543e627f8a464a"
 
 [[package]]
-name = "backup"
-version = "0.1.0"
-dependencies = [
- "app_dirs",
- "iced",
- "iced_graphics",
- "iced_native",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "base64"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -144,6 +132,18 @@ name = "bumpalo"
 version = "3.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "099e596ef14349721d9016f6b80dd3419ea1bf289ab9b44df8e4dfd3a005d5d9"
+
+[[package]]
+name = "bup"
+version = "0.1.0"
+dependencies = [
+ "app_dirs",
+ "iced",
+ "iced_graphics",
+ "iced_native",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "bytemuck"
