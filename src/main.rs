@@ -1,6 +1,6 @@
 use iced::{button, pick_list, text_input};
 use iced::{Align, Button, Column, Element, PickList, Row, Text, TextInput};
-use iced::{Application, Command, Settings, Font, HorizontalAlignment, Length};
+use iced::{Application, Command, Font, HorizontalAlignment, Length, Settings};
 use iced_graphics::{Backend, Renderer};
 use iced_native::Widget;
 use serde::{Deserialize, Serialize};
@@ -10,6 +10,7 @@ use app_dirs::*;
 
 mod path;
 use path::FilePicker;
+mod style;
 
 pub const TEXT_SIZE: u16 = 12;
 pub const BUTTON_PAD: u16 = 2;
@@ -198,13 +199,18 @@ pub struct Backup {
     s_exclude: Vec<text_input::State>,
     #[serde(skip)]
     s_new_exclude: button::State,
+    #[serde(skip)]
+    s_delete_source_button: Vec<button::State>,
 }
 
 impl Backup {
     pub fn update(&mut self, message: BackupMessage) -> Command<BackupMessage> {
         match message {
             BackupMessage::SetName(name) => self.name = name,
-            BackupMessage::NewSource => self.source.push(Default::default()),
+            BackupMessage::NewSource => {
+                self.source.push(Default::default());
+                self.s_delete_source_button.push(Default::default());
+            },
             BackupMessage::Source(i, source) => {
                 let command = self.source[i]
                     .update(source)
@@ -237,29 +243,29 @@ impl Backup {
                 Row::new()
                     // Sources
                     //
-                    // Button::new(
-                    // delete_button,
-                    // Row::new()
-                    // .spacing(10)
-                    // .push(delete_icon())
-                    // .push(Text::new("Delete")),
-                    // )
-                    // .on_press(TaskMessage::Delete)
-                    // .padding(10)
-                    // .style(style::Button::Destructive)
                     .push(
                         Column::new()
                             .push(Text::new("Sources").size(TEXT_SIZE))
-                            .push(self.source.iter_mut().enumerate().fold(
-                                Column::new(),
-                                |column, (i, source)| {
-                                    column.push(
+                            .push_iter(self.source.iter_mut().enumerate().map(|(i, source)| {
+                                Row::new()
+                                    .push(
                                         source
                                             .view(TEXT_SIZE, BUTTON_PAD)
                                             .map(move |msg| BackupMessage::Source(i, msg)),
                                     )
-                                },
-                            ))
+                                    .push(
+                                        Button::new(
+                                            &mut self.s_delete_source_button[i],
+                                            Row::new()
+                                                .spacing(10)
+                                                .push(delete_icon())
+                                                .push(Text::new("Delete")),
+                                        )
+                                        .on_press(BackupMessage::DelSource (i))
+                                        .padding(10)
+                                        .style(style::Button::Destructive),
+                                    )
+                            }))
                             .push(
                                 Button::new(
                                     &mut self.s_new_source,
