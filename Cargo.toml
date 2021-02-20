@@ -7,9 +7,14 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-iced = "0.2"
-iced_native = "0.3"
-iced_graphics = "0.1"
-app_dirs = "1.2.1"
+iced = { git = "https://github.com/hecrj/iced.git", features = ["tokio"] }
+iced_native = {git = "https://github.com/hecrj/iced.git"}
+iced_graphics = {git = "https://github.com/hecrj/iced.git"}
+app_dirs = "1.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+anyhow = "1.0"
+
+tokio = { version = "1.2", features = ["rt"] }
+
+nfd = "0.0.4"
