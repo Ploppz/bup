@@ -1,6 +1,6 @@
-use iced::{button, pick_list, text_input};
-use iced::{Align, Button, Column, Element, PickList, Row, Text, TextInput};
-use iced::{Application, Command, Font, HorizontalAlignment, Length, Settings};
+use iced::{button, pick_list, scrollable, text_input};
+use iced::{Align, Button, Column, Container, Element, PickList, Row, Scrollable, Text, TextInput};
+use iced::{Application, Color, Command, Font, HorizontalAlignment, Length, Settings};
 use iced_graphics::{Backend, Renderer};
 use iced_native::Widget;
 use serde::{Deserialize, Serialize};
@@ -8,33 +8,44 @@ use std::path::PathBuf;
 
 use app_dirs::*;
 
+mod icon;
 mod path;
-use path::FilePicker;
 mod style;
 
-pub const TEXT_SIZE: u16 = 12;
+pub use icon::Icon;
+pub use path::FilePicker;
+
+pub const TEXT_SIZE: u16 = 20;
 pub const BUTTON_PAD: u16 = 2;
 
 // Fonts
 const ICONS: Font = Font::External {
     name: "Icons",
-    bytes: include_bytes!("../fonts/icons.ttf"),
+    bytes: include_bytes!("../fonts/agave.ttf"),
 };
 
 fn icon(unicode: char) -> Text {
     Text::new(&unicode.to_string())
         .font(ICONS)
+        .width(Length::Units(TEXT_SIZE))
+        .size(TEXT_SIZE)
+}
+fn icon_h3(unicode: char) -> Text {
+    Text::new(&unicode.to_string())
+        .size(22)
+        // .color([0.7,0.7,0.7])
+        .font(ICONS)
         .width(Length::Units(20))
+}
+fn text<T: Into<String>>(text: T) -> Text {
+    Text::new(text).font(ICONS).size(TEXT_SIZE)
+}
+
+fn h3<T: Into<String>>(text: T) -> Text {
+    Text::new(text)
+        .size(22)
+        .color([0.7, 0.7, 0.7])
         .horizontal_alignment(HorizontalAlignment::Center)
-        .size(20)
-}
-
-fn edit_icon() -> Text {
-    icon('\u{F303}')
-}
-
-fn delete_icon() -> Text {
-    icon('\u{F1F8}')
 }
 
 const APP_INFO: AppInfo = AppInfo {
@@ -52,6 +63,8 @@ pub struct Ui {
     directories: Vec<Backup>,
     #[serde(skip)]
     new_button: button::State,
+    #[serde(skip)]
+    s_scrollable: scrollable::State,
 }
 
 #[derive(Debug, Clone)]
@@ -93,18 +106,22 @@ impl Application for Ui {
                 column.push(directory.view().map(move |msg| Message::Backup(i, msg)))
             })
             .into();
-        Column::new()
-            .push(directories)
+        Scrollable::new(&mut self.s_scrollable)
             .push(
-                Button::new(
-                    &mut self.new_button,
-                    Text::new("New directory").size(TEXT_SIZE),
-                )
-                .padding(BUTTON_PAD)
-                .on_press(Message::NewBackup),
+                Column::new()
+                    .push(directories)
+                    .push(
+                        Button::new(
+                            &mut self.new_button,
+                            Text::new("New directory").size(TEXT_SIZE),
+                        )
+                        .style(style::Button::Creation)
+                        .padding(BUTTON_PAD)
+                        .on_press(Message::NewBackup),
+                    )
+                    .padding(20)
+                    .align_items(Align::Center),
             )
-            .padding(20)
-            .align_items(Align::Center)
             .into()
     }
 }
@@ -161,13 +178,6 @@ impl Duplication {
     }
 }
 
-//
-//
-// New attempt
-//
-//
-
-// Vec<Backup>
 
 #[derive(Debug, Clone)]
 pub enum BackupMessage {
@@ -201,6 +211,8 @@ pub struct Backup {
     s_new_exclude: button::State,
     #[serde(skip)]
     s_delete_source_button: Vec<button::State>,
+    #[serde(skip)]
+    s_delete_exclude_button: Vec<button::State>,
 }
 
 impl Backup {
@@ -210,7 +222,7 @@ impl Backup {
             BackupMessage::NewSource => {
                 self.source.push(Default::default());
                 self.s_delete_source_button.push(Default::default());
-            },
+            }
             BackupMessage::Source(i, source) => {
                 let command = self.source[i]
                     .update(source)
@@ -223,6 +235,7 @@ impl Backup {
             BackupMessage::NewExclude => {
                 self.exclude.push(Default::default());
                 self.s_exclude.push(Default::default());
+                self.s_delete_exclude_button.push(Default::default());
             }
             BackupMessage::SetExclude(i, exclude) => self.exclude[i] = exclude,
             BackupMessage::DelExclude(i) => {
@@ -236,74 +249,110 @@ impl Backup {
             .padding(20)
             // .align_items(Align::Center)
             .push(
-                TextInput::new(&mut self.s_name, "Name", &self.name, BackupMessage::SetName)
-                    .size(TEXT_SIZE),
+                Row::new().push(Icon::Folder.h3()).push(
+                    TextInput::new(&mut self.s_name, "Name", &self.name, BackupMessage::SetName)
+                        .style(style::TextInput)
+                        .size(20),
+                ),
             )
             .push(
                 Row::new()
                     // Sources
-                    //
                     .push(
-                        Column::new()
-                            .push(Text::new("Sources").size(TEXT_SIZE))
-                            .push_iter(self.source.iter_mut().enumerate().map(|(i, source)| {
-                                Row::new()
-                                    .push(
-                                        source
-                                            .view(TEXT_SIZE, BUTTON_PAD)
-                                            .map(move |msg| BackupMessage::Source(i, msg)),
-                                    )
-                                    .push(
-                                        Button::new(
-                                            &mut self.s_delete_source_button[i],
-                                            Row::new()
-                                                .spacing(10)
-                                                .push(delete_icon())
-                                                .push(Text::new("Delete")),
+                        Container::new({
+                            let mut col = Column::new().push(h3("Sources"));
+                            for (i, (source, del_button)) in self
+                                .source
+                                .iter_mut()
+                                .zip(self.s_delete_source_button.iter_mut())
+                                .enumerate()
+                            {
+                                col = col.push(
+                                    Row::new()
+                                        .push(
+                                            source
+                                                .view(TEXT_SIZE, BUTTON_PAD)
+                                                .map(move |msg| BackupMessage::Source(i, msg)),
                                         )
-                                        .on_press(BackupMessage::DelSource (i))
-                                        .padding(10)
-                                        .style(style::Button::Destructive),
-                                    )
-                            }))
-                            .push(
+                                        .push(
+                                            Button::new(del_button, Icon::Delete.text())
+                                                .on_press(BackupMessage::DelSource(i))
+                                                .padding(0)
+                                                .style(style::Button::Icon {
+                                                    hover_color: Color::from_rgb(0.7, 0.2, 0.2),
+                                                }),
+                                        ),
+                                );
+                            }
+                            col = col.push(
                                 Button::new(
                                     &mut self.s_new_source,
                                     Text::new("New source").size(TEXT_SIZE),
                                 )
                                 .padding(BUTTON_PAD)
+                                .style(style::Button::Creation)
                                 .on_press(BackupMessage::NewSource),
-                            ),
+                            );
+                            col
+                        })
+                        .width(Length::FillPortion(1)),
                     )
                     // Excludes (TODO)
                     .push(
-                        Column::new()
-                            .push(Text::new("Excludes").size(TEXT_SIZE))
-                            .push(
-                                self.exclude
-                                    .iter_mut()
-                                    .zip(self.s_exclude.iter_mut())
-                                    .enumerate()
-                                    .fold(Column::new(), |column, (i, (exclude, state))| {
-                                        column.push(
-                                            TextInput::new(
-                                                state,
-                                                "Exclude string",
-                                                exclude,
-                                                move |s| BackupMessage::SetExclude(i, s),
-                                            )
-                                            .size(TEXT_SIZE),
-                                        )
-                                    }),
-                            )
-                            .push(
-                                Button::new(
-                                    &mut self.s_new_exclude,
-                                    Text::new("New exclude").size(TEXT_SIZE),
+                        Container::new(
+                            Column::new()
+                                .push(h3("Excludes"))
+                                .push(
+                                    self.exclude
+                                        .iter_mut()
+                                        .zip(self.s_exclude.iter_mut())
+                                        .zip(self.s_delete_exclude_button.iter_mut())
+                                        .enumerate()
+                                        .fold(
+                                            Column::new(),
+                                            |column, (i, ((exclude, state), del_button))| {
+                                                column.push(
+                                                    Row::new()
+                                                        .push(
+                                                            TextInput::new(
+                                                                state,
+                                                                "Exclude string",
+                                                                exclude,
+                                                                move |s| {
+                                                                    BackupMessage::SetExclude(i, s)
+                                                                },
+                                                            )
+                                                            .style(style::TextInput)
+                                                            .size(TEXT_SIZE),
+                                                        )
+                                                        .push(
+                                                            Button::new(
+                                                                del_button,
+                                                                Icon::Delete.text(),
+                                                            )
+                                                            .on_press(BackupMessage::DelExclude(i))
+                                                            .padding(0)
+                                                            .style(style::Button::Icon {
+                                                                hover_color: Color::from_rgb(
+                                                                    0.7, 0.2, 0.2,
+                                                                ),
+                                                            }),
+                                                        ),
+                                                )
+                                            },
+                                        ),
                                 )
-                                .padding(BUTTON_PAD)
-                                .on_press(BackupMessage::NewExclude),
-                            ),
+                                .push(
+                                    Button::new(
+                                        &mut self.s_new_exclude,
+                                        Text::new("New exclude").size(TEXT_SIZE),
+                                    )
+                                    .style(style::Button::Creation)
+                                    .padding(BUTTON_PAD)
+                                    .on_press(BackupMessage::NewExclude),
+                                ),
+                        )
+                        .width(Length::FillPortion(1)),
                     ),
             )
             .into()

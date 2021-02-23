@@ -6,10 +6,11 @@ use nfd::Response;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
+use crate::style;
 
 pub async fn open() -> anyhow::Result<PathBuf> {
     let result = tokio::task::spawn_blocking(|| {
-        let result: nfd::Response = match nfd::open_file_dialog(Some("json"), None) {
+        let result: nfd::Response = match nfd::open_pick_folder(None) {
             Ok(result) => result,
             Err(_) => {
                 return Err(io::Error::new(
@@ -90,11 +91,11 @@ impl FilePicker {
         };
         Row::new()
             .push(
-                Button::new(&mut self.s_button, Text::new("Set path").size(text_size))
+                Button::new(&mut self.s_button, Text::new(text).size(text_size))
                     .padding(button_pad)
+                    .style(style::Button::Path)
                     .on_press(Message::SelectPath),
             )
-            .push(Text::new(text).size(text_size))
             .into()
     }
 }
