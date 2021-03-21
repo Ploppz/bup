@@ -5,6 +5,7 @@ pub enum Button {
     Icon { hover_color: Color },
     Creation,
     Path,
+    Item,
 }
 
 impl button::StyleSheet for Button {
@@ -24,6 +25,10 @@ impl button::StyleSheet for Button {
                 background: None,
                 ..button::Style::default()
             },
+            Button::Item => button::Style {
+                background: Some(Background::Color(Color::from_rgb(0.8,0.8,0.8))),
+                ..button::Style::default()
+            }
         }
     }
 
@@ -35,7 +40,7 @@ impl button::StyleSheet for Button {
                 shadow_offset: active.shadow_offset + Vector::new(0.0, 1.0),
                 ..active
             },
-            Button::Creation => button::Style {
+            Button::Creation | Button::Item => button::Style {
                 shadow_offset: active.shadow_offset + Vector::new(0.0, 1.0),
                 ..active
             },

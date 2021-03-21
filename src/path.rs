@@ -54,8 +54,6 @@ pub async fn open() -> anyhow::Result<PathBuf> {
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug)]
 pub struct FilePicker {
-    pub path: Option<PathBuf>,
-
     #[serde(skip)]
     s_button: button::State,
 }
@@ -71,23 +69,24 @@ impl FilePicker {
         Self::default()
     }
     pub fn update(&mut self, msg: Message) -> Command<Message> {
+        println!("FilePicker::update {:?}", msg);
         match msg {
             Message::SelectPath => Command::perform(open(), |result| match result {
-                Ok(path) => Message::Path(path),
+                Ok(path) => {
+                    Message::Path(path)
+                },
                 Err(e) => Message::Error(e.to_string()),
             }), // TODO next return command
             Message::Path(path) => {
-                self.path = Some(path);
                 Command::none()
             }
-            // Error (e) => self.path = None,
             _ => Command::none(),
         }
     }
-    pub fn view(&mut self, text_size: u16, button_pad: u16) -> Element<Message> {
-        let text = match self.path {
-            Some(ref path) => path.display().to_string(),
-            None => format!("No file selected"),
+    pub fn view(&mut self, path: Option<&Path>, text_size: u16, button_pad: u16) -> Element<Message> {
+        let text = match path {
+            Some(path) => path.display().to_string(),
+            None => format!("No folder selected"),
         };
         Row::new()
             .push(
