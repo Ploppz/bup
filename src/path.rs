@@ -69,14 +69,13 @@ impl FilePicker {
         Self::default()
     }
     pub fn update(&mut self, msg: Message) -> Command<Message> {
-        println!("FilePicker::update {:?}", msg);
         match msg {
             Message::SelectPath => Command::perform(open(), |result| match result {
                 Ok(path) => {
                     Message::Path(path)
                 },
                 Err(e) => Message::Error(e.to_string()),
-            }), // TODO next return command
+            }),
             Message::Path(path) => {
                 Command::none()
             }

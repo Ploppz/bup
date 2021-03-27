@@ -149,7 +149,7 @@ impl Application for Ui {
             Message::Editor(msg) => {
                 match msg {
                     EditorMessage::Save => {
-                        let successful = match &self.scene {
+                        match &self.scene {
                             Scene::Create { editor } => {
                                 if let Ok(()) = verify_directory(&editor.directory) {
                                     self.directories.push(editor.directory.clone());
@@ -395,7 +395,6 @@ impl Editor {
                 self.s_source.push(Default::default());
             }
             EditorMessage::Source(i, msg) => {
-                println!("EditorMessage::Source: {:?}", msg);
                 if let path::Message::Path(ref path) = msg {
                     self.directory.sources[i] = Some(path.clone());
                 }
