@@ -1,12 +1,13 @@
+use crate::style;
 use iced::{button, pick_list, text_input};
 use iced::{
-    Align, Button, Column, Command, Element, PickList, Row, Sandbox, Settings, Text, TextInput,
+    Align, Button, Column, Command, Element, Length, PickList, Row, Sandbox, Settings, Text,
+    TextInput,
 };
 use nfd::Response;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
-use crate::style;
 
 pub async fn open() -> anyhow::Result<PathBuf> {
     let result = tokio::task::spawn_blocking(|| {
@@ -71,23 +72,25 @@ impl FilePicker {
     pub fn update(&mut self, msg: Message) -> Command<Message> {
         match msg {
             Message::SelectPath => Command::perform(open(), |result| match result {
-                Ok(path) => {
-                    Message::Path(path)
-                },
+                Ok(path) => Message::Path(path),
                 Err(e) => Message::Error(e.to_string()),
             }),
-            Message::Path(path) => {
-                Command::none()
-            }
+            Message::Path(path) => Command::none(),
             _ => Command::none(),
         }
     }
-    pub fn view(&mut self, path: Option<&Path>, text_size: u16, button_pad: u16) -> Element<Message> {
+    pub fn view(
+        &mut self,
+        path: Option<&Path>,
+        text_size: u16,
+        button_pad: u16,
+    ) -> Element<Message> {
         let text = match path {
             Some(path) => path.display().to_string(),
             None => format!("No folder selected"),
         };
         Row::new()
+            .width(Length::Fill)
             .push(
                 Button::new(&mut self.s_button, Text::new(text).size(text_size))
                     .padding(button_pad)

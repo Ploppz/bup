@@ -1,12 +1,14 @@
 use iced::{button, pick_list, scrollable, text_input};
 use iced::{Align, Button, Column, Container, Element, PickList, Row, Scrollable, Text, TextInput};
-use iced::{Application, Color, Command, Font, HorizontalAlignment, Length, Settings, Size};
+use iced::{
+    Application, Background, Color, Command, Font, HorizontalAlignment, Length, Settings, Size,
+};
 // use iced_graphics::{Backend, Renderer};
 use iced_native::{layout::Node, Overlay, Point, Widget};
 use iced_wgpu::{Backend, Renderer};
 use itertools::izip;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use app_dirs::*;
 
@@ -22,11 +24,18 @@ pub use path::FilePicker;
 pub use util::*;
 
 pub const TEXT_SIZE: u16 = 20;
+pub const H3_SIZE: u16 = 24;
 pub const BUTTON_PAD: u16 = 2;
 
 pub use config::*;
 mod config {
     use super::*;
+    #[derive(Clone, Debug, Serialize, Deserialize, Default)]
+    pub struct Config {
+        pub directories: Vec<Directory>,
+        pub rdedup_home: PathBuf,
+    }
+
     #[derive(Clone, Debug, Serialize, Deserialize, Default)]
     pub struct Directory {
         pub name: String,
@@ -34,7 +43,17 @@ mod config {
         pub sources: Vec<Option<PathBuf>>,
         /// Exclude pattern sent to `tar` via `--exclude`
         pub excludes: Vec<String>,
-        // TODO duplications
+        pub duplication: Vec<Duplication>,
+    }
+
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub struct Duplication {
+        interval: Duration,
+        kind: DuplicationKind,
+    }
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub enum DuplicationKind {
+        Disk { path: PathBuf },
     }
 }
 
@@ -53,6 +72,7 @@ pub enum Scene {
     Overview {
         list: Vec<ListItemState>,
         new_button: button::State,
+        selected: Option<usize>,
     },
     Create {
         editor: Editor,
@@ -66,11 +86,13 @@ impl Ui {
     pub fn enter_overview(&mut self) {
         self.scene = Scene::Overview {
             list: self
+                .config
                 .directories
                 .iter()
                 .map(|_| ListItemState::default())
                 .collect(),
             new_button: Default::default(),
+            selected: None,
         };
     }
     pub fn enter_create(&mut self) {
@@ -79,7 +101,7 @@ impl Ui {
         };
     }
     pub fn enter_edit(&mut self, dir_index: usize) {
-        let dir = self.directories[dir_index].clone();
+        let dir = self.config.directories[dir_index].clone();
         self.scene = Scene::Edit {
             editor: Editor::with_directory(dir),
             dir_index,
@@ -91,13 +113,14 @@ impl Default for Scene {
         Scene::Overview {
             list: vec![],
             new_button: Default::default(),
+            selected: None,
         }
     }
 }
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct Ui {
-    directories: Vec<Directory>,
+    config: Config,
     #[serde(skip)]
     scene: Scene,
 
@@ -126,7 +149,7 @@ impl Application for Ui {
         String::from("Ui - Iced")
     }
 
-    fn update(&mut self, message: Message) -> Command<Message> {
+    fn update(&mut self, message: Message, _clip: &mut iced::Clipboard) -> Command<Message> {
         match message {
             Message::ToOverview => {
                 self.enter_overview();
@@ -152,13 +175,13 @@ impl Application for Ui {
                         match &self.scene {
                             Scene::Create { editor } => {
                                 if let Ok(()) = verify_directory(&editor.directory) {
-                                    self.directories.push(editor.directory.clone());
+                                    self.config.directories.push(editor.directory.clone());
                                     self.enter_overview();
                                 }
                             }
                             Scene::Edit { editor, dir_index } => {
                                 if let Ok(()) = verify_directory(&editor.directory) {
-                                    self.directories[*dir_index] = editor.directory.clone();
+                                    self.config.directories[*dir_index] = editor.directory.clone();
                                     self.enter_overview();
                                 }
                             }
@@ -181,9 +204,14 @@ impl Application for Ui {
     }
 
     fn view(&mut self) -> Element<Message> {
-        match &mut self.scene {
-            Scene::Overview { list, new_button } => {
+        let w: Element<Message> = match &mut self.scene {
+            Scene::Overview {
+                list,
+                new_button,
+                selected,
+            } => {
                 let directories: Element<_> = self
+                    .config
                     .directories
                     .iter()
                     .zip(list.iter_mut())
@@ -205,9 +233,21 @@ impl Application for Ui {
                     .into()
             }
             Scene::Create { editor } | Scene::Edit { editor, .. } => {
-                editor.view().map(Message::Editor)
+                // Center the editor
+                Container::new(editor.view().map(Message::Editor))
+                    .padding(50)
+                    .align_x(Align::Center)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
             }
-        }
+        };
+        // To apply a global style
+        Container::new(w)
+            .style(style::AppContainer)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 }
 
@@ -227,6 +267,8 @@ pub struct Editor {
 
     s_source: Vec<FilePicker>,
     s_delete_source_button: Vec<button::State>,
+
+    s_scrollable: scrollable::State,
 }
 impl Editor {
     pub fn with_directory(directory: Directory) -> Self {
@@ -244,9 +286,10 @@ impl Editor {
     pub fn view<'a>(&'a mut self) -> Element<'a, EditorMessage> {
         let mut x = Column::new()
             .padding(20)
+            .spacing(20)
             // .align_items(Align::Center)
             .push(
-                Row::new().push(Icon::Folder.h3()).push(
+                Row::new().spacing(8).push(Icon::Folder.h3()).push(
                     TextInput::new(
                         &mut self.s_name,
                         "Name",
@@ -254,134 +297,144 @@ impl Editor {
                         EditorMessage::SetName,
                     )
                     .style(style::TextInput)
-                    .size(20),
+                    .size(H3_SIZE),
                 ),
             )
+            // Sources
             .push(
-                Row::new()
-                    // Sources
-                    .push(
-                        Container::new({
-                            let mut col = Column::new().push(h3("Sources"));
-                            for (i, (source, del_button, file_picker)) in izip!(
-                                &self.directory.sources,
-                                &mut self.s_delete_source_button,
-                                &mut self.s_source
-                            )
-                            .enumerate()
-                            {
-                                col = col.push(
-                                    Row::new()
-                                        .push(
-                                            file_picker
-                                                .view(
-                                                    source.as_ref().map(|x| x.as_path()),
-                                                    TEXT_SIZE,
-                                                    BUTTON_PAD,
-                                                )
-                                                .map(move |msg| EditorMessage::Source(i, msg)),
-                                        )
-                                        .push(
-                                            Button::new(del_button, Icon::Delete.text())
-                                                .on_press(EditorMessage::DelSource(i))
-                                                .padding(0)
-                                                .style(style::Button::Icon {
-                                                    hover_color: Color::from_rgb(0.7, 0.2, 0.2),
-                                                }),
-                                        ),
-                                );
-                            }
-                            col = col.push(
-                                Button::new(
-                                    &mut self.s_new_source,
-                                    Text::new("New source").size(TEXT_SIZE),
-                                )
-                                .padding(BUTTON_PAD)
-                                .style(style::Button::Creation)
+                Container::new({
+                    let mut col = Column::new().push(
+                        Row::new().spacing(20).push(h3("Sources")).push(
+                            // TODO: icon button
+                            Button::new(&mut self.s_new_source, Icon::New.text())
+                                .padding(4)
+                                .style(style::Button::Icon {
+                                    hover_color: Color::WHITE,
+                                })
                                 .on_press(EditorMessage::NewSource),
-                            );
-                            col
-                        })
-                        .width(Length::FillPortion(1)),
+                        ),
+                    );
+                    for (i, (source, del_button, file_picker)) in izip!(
+                        &self.directory.sources,
+                        &mut self.s_delete_source_button,
+                        &mut self.s_source
                     )
-                    .push(
-                        Container::new(
-                            Column::new()
-                                .push(h3("Excludes"))
+                    .enumerate()
+                    {
+                        col = col.push(
+                            Row::new()
                                 .push(
-                                    self.directory
-                                        .excludes
-                                        .iter_mut()
-                                        .zip(self.s_exclude.iter_mut())
-                                        .zip(self.s_delete_exclude_button.iter_mut())
-                                        .enumerate()
-                                        .fold(
-                                            Column::new(),
-                                            |column, (i, ((exclude, state), del_button))| {
-                                                column.push(
-                                                    Row::new()
-                                                        .push(
-                                                            TextInput::new(
-                                                                state,
-                                                                "Exclude string",
-                                                                exclude,
-                                                                move |s| {
-                                                                    EditorMessage::SetExclude(i, s)
-                                                                },
-                                                            )
-                                                            .style(style::TextInput)
-                                                            .size(TEXT_SIZE),
-                                                        )
-                                                        .push(
-                                                            Button::new(
-                                                                del_button,
-                                                                Icon::Delete.text(),
-                                                            )
-                                                            .on_press(EditorMessage::DelExclude(i))
-                                                            .padding(0)
-                                                            .style(style::Button::Icon {
-                                                                hover_color: Color::from_rgb(
-                                                                    0.7, 0.2, 0.2,
-                                                                ),
-                                                            }),
-                                                        ),
-                                                )
-                                            },
-                                        ),
+                                    file_picker
+                                        .view(
+                                            source.as_ref().map(|x| x.as_path()),
+                                            TEXT_SIZE,
+                                            BUTTON_PAD,
+                                        )
+                                        .map(move |msg| EditorMessage::Source(i, msg)),
                                 )
                                 .push(
-                                    Button::new(
-                                        &mut self.s_new_exclude,
-                                        Text::new("New exclude").size(TEXT_SIZE),
-                                    )
-                                    .style(style::Button::Creation)
+                                    Button::new(del_button, Icon::Delete.text())
+                                        .on_press(EditorMessage::DelSource(i))
+                                        .padding(0)
+                                        .style(style::Button::Icon {
+                                            hover_color: Color::from_rgb(0.7, 0.2, 0.2),
+                                        }),
+                                ),
+                        );
+                    }
+                    col
+                })
+                .width(Length::FillPortion(1)),
+            )
+            // Excludes
+            .push(
+                Container::new(
+                    Column::new()
+                        .push(
+                            Row::new().spacing(20).push(h3("Excludes")).push(
+                                Button::new(&mut self.s_new_exclude, Icon::New.text())
+                                    .style(style::Button::Icon {
+                                        hover_color: Color::WHITE,
+                                    })
                                     .padding(BUTTON_PAD)
                                     .on_press(EditorMessage::NewExclude),
-                                ),
+                            ),
                         )
-                        .width(Length::FillPortion(1)),
-                    ),
+                        .push(
+                            self.directory
+                                .excludes
+                                .iter_mut()
+                                .zip(self.s_exclude.iter_mut())
+                                .zip(self.s_delete_exclude_button.iter_mut())
+                                .enumerate()
+                                .fold(
+                                    Column::new(),
+                                    |column, (i, ((exclude, state), del_button))| {
+                                        column.push(
+                                            Row::new()
+                                                .push(
+                                                    TextInput::new(
+                                                        state,
+                                                        "Exclude string",
+                                                        exclude,
+                                                        move |s| EditorMessage::SetExclude(i, s),
+                                                    )
+                                                    .style(style::TextInput)
+                                                    .size(TEXT_SIZE),
+                                                )
+                                                .push(
+                                                    Button::new(del_button, Icon::Delete.text())
+                                                        .on_press(EditorMessage::DelExclude(i))
+                                                        .padding(0)
+                                                        .style(style::Button::Icon {
+                                                            hover_color: Color::from_rgb(
+                                                                0.7, 0.2, 0.2,
+                                                            ),
+                                                        }),
+                                                ),
+                                        )
+                                    },
+                                ),
+                        ),
+                )
+                .width(Length::FillPortion(1)),
             )
             .push(
-                Row::new()
-                    .push(
-                        Container::new(
-                            Button::new(&mut self.s_save_button, Text::new("Save"))
-                                .on_press(EditorMessage::Save),
+                Container::new(
+                    Row::new()
+                        .spacing(10)
+                        .push(
+                            Button::new(
+                                &mut self.s_cancel_button,
+                                Text::new("CANCEL").size(TEXT_SIZE - 4),
+                            )
+                            .padding(8)
+                            .style(style::Button::Text)
+                            .on_press(EditorMessage::Cancel),
                         )
-                        .width(Length::FillPortion(1)),
-                    )
-                    .push(
-                        Container::new(
-                            Button::new(&mut self.s_cancel_button, Text::new("Cancel"))
-                                .on_press(EditorMessage::Cancel),
-                        )
-                        .width(Length::FillPortion(1)),
-                    ),
+                        .push(
+                            Button::new(
+                                &mut self.s_save_button,
+                                Text::new("SAVE").size(TEXT_SIZE - 4),
+                            )
+                            .padding(8)
+                            .style(style::Button::Primary)
+                            .on_press(EditorMessage::Save),
+                        ),
+                )
+                .width(Length::Fill)
+                .align_x(Align::End),
             );
         if let Some(ref error) = self.error {
-            x = x .push(Text::new(error).color(Color::from_rgb(0.5, 0.0, 0.0)))
+            x = x.push(Text::new(error).color(Color::from_rgb(0.5, 0.0, 0.0)))
         }
+        use iced::widget::container::{self, Style};
+        let x = Container::new(x)
+            .style(style::EditorContainer)
+            .width(Length::Fill)
+            .max_width(1000)
+            .height(Length::Shrink);
+        let x = Scrollable::new(&mut self.s_scrollable).push(x);
         x.into()
     }
     pub fn update(&mut self, message: EditorMessage) -> Command<EditorMessage> {
