@@ -194,8 +194,9 @@ impl Application for Ui {
                     _ => (),
                 }
                 match &mut self.scene {
-                    Scene::Create { editor, .. } | Scene::Edit { editor, .. } => editor.update(msg).map(Message::Editor)
-,
+                    Scene::Create { editor, .. } | Scene::Edit { editor, .. } => {
+                        editor.update(msg).map(Message::Editor)
+                    }
                     // Possible because scene might change above
                     _ => Command::none(),
                 }
@@ -204,7 +205,7 @@ impl Application for Ui {
     }
 
     fn view(&mut self) -> Element<Message> {
-        let w: Element<Message> = match &mut self.scene {
+        let w: Container<Message> = match &mut self.scene {
             Scene::Overview {
                 list,
                 new_button,
@@ -226,11 +227,22 @@ impl Application for Ui {
                             )
                         },
                     )
-                    .push(Button::new(new_button, Text::new("New")).on_press(Message::NewDir))
+                    .push(
+                        Row::new()
+                            .spacing(20)
+                            .push(Text::new("BUP").size(H3_SIZE))
+                            .push(
+                                Button::new(new_button, Text::new("NEW BUP").size(TEXT_SIZE - 4))
+                                    .style(style::Button::Primary)
+                                    .on_press(Message::NewDir),
+                            ),
+                    )
                     .into();
-                Scrollable::new(&mut self.s_scrollable)
-                    .push(directories)
-                    .into()
+                Container::new(Scrollable::new(&mut self.s_scrollable).push(directories))
+                    .padding(15)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .style(style::MenuContainer)
             }
             Scene::Create { editor } | Scene::Edit { editor, .. } => {
                 // Center the editor
@@ -239,7 +251,6 @@ impl Application for Ui {
                     .align_x(Align::Center)
                     .width(Length::Fill)
                     .height(Length::Fill)
-                    .into()
             }
         };
         // To apply a global style

@@ -122,10 +122,10 @@ impl container::StyleSheet for EditorContainer {
     fn style(&self) -> container::Style {
         container::Style {
             text_color: Some(Color::from_rgb(1.0, 1.0, 1.0)),
-            background: Some(Background::Color(Color::from_rgb(0.0, 0.0, 0.0))),
-            border_radius: 24.0,
-            border_width: 3.0,
-            border_color: Color::from_rgb(0.2, 0.2, 0.2),
+            background: Some(Background::Color(Color::from_rgb(0.07, 0.07, 0.07))),
+            border_radius: 18.0,
+            border_width: 0.0,
+            border_color: Color::TRANSPARENT,
         }
     }
 }
@@ -135,7 +135,21 @@ impl container::StyleSheet for AppContainer {
     fn style(&self) -> container::Style {
         container::Style {
             text_color: Some(Color::WHITE),
-            background: Some(Background::Color(Color::from_rgb(0.0, 0.0, 0.0))),
+            background: Some(Background::Color(Color::BLACK)),
+            border_radius: 0.0,
+            border_width: 0.0,
+            border_color: Color::from_rgb(0.0, 0.0, 0.0),
+        }
+    }
+}
+
+pub struct MenuContainer;
+
+impl container::StyleSheet for MenuContainer {
+    fn style(&self) -> container::Style {
+        container::Style {
+            text_color: Some(Color::WHITE),
+            background: Some(Background::Color(Color::from_rgb(0.07, 0.07, 0.07))),
             border_radius: 0.0,
             border_width: 0.0,
             border_color: Color::from_rgb(0.0, 0.0, 0.0),
