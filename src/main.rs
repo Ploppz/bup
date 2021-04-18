@@ -211,33 +211,30 @@ impl Application for Ui {
                 new_button,
                 selected,
             } => {
-                let directories: Element<_> = self
+                let mut directories: Column<Message> = Column::new().spacing(20).push(
+                    Row::new()
+                        .spacing(20)
+                        .push(Text::new("BUP").size(H3_SIZE))
+                        .push(
+                            Button::new(new_button, Text::new("NEW BUP").size(TEXT_SIZE - 4))
+                                .style(style::Button::Primary)
+                                .on_press(Message::NewDir),
+                        ),
+                );
+                for (i, (directory, state)) in self
                     .config
                     .directories
                     .iter()
                     .zip(list.iter_mut())
                     .enumerate()
-                    .fold(
-                        Column::new().spacing(20),
-                        |column, (i, (directory, state))| {
-                            column.push(
-                                state
-                                    .view(&directory)
-                                    .map(move |msg| Message::ListItem(i, msg)),
-                            )
-                        },
-                    )
-                    .push(
-                        Row::new()
-                            .spacing(20)
-                            .push(Text::new("BUP").size(H3_SIZE))
-                            .push(
-                                Button::new(new_button, Text::new("NEW BUP").size(TEXT_SIZE - 4))
-                                    .style(style::Button::Primary)
-                                    .on_press(Message::NewDir),
-                            ),
-                    )
-                    .into();
+                {
+                    directories = directories.push(
+                        state
+                            .view(&directory)
+                            .map(move |msg| Message::ListItem(i, msg)),
+                    );
+                }
+
                 Container::new(Scrollable::new(&mut self.s_scrollable).push(directories))
                     .padding(15)
                     .width(Length::Fill)
