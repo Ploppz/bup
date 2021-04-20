@@ -10,8 +10,6 @@ use itertools::izip;
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, time::Duration};
 
-use app_dirs::*;
-
 mod ext;
 mod icon;
 mod path;
@@ -57,13 +55,7 @@ mod config {
     }
 }
 
-const APP_INFO: AppInfo = AppInfo {
-    name: "bup",
-    author: "Erlend Langseth",
-};
-
 pub fn main() -> iced::Result {
-    println!("{:?}", get_app_root(AppDataType::UserConfig, &APP_INFO));
     Ui::run(Settings::default())
 }
 
@@ -142,7 +134,19 @@ impl Application for Ui {
     type Message = Message;
     type Flags = ();
     fn new(_flags: ()) -> (Self, Command<Message>) {
-        (Self::default(), Command::none())
+        let config = if let Ok(config) = Config::load() {
+            config
+        } else {
+            Config::default()
+        };
+        (
+            Ui {
+                config,
+                scene: Default::default(),
+                s_scrollable: Default::default(),
+            },
+            Command::none(),
+        )
     }
 
     fn title(&self) -> String {
@@ -541,4 +545,54 @@ fn verify_directory(dir: &Directory) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+// Persistent state
+
+fn config_path() -> std::path::PathBuf {
+    let mut path = if let Some(project_dirs) = directories_next::ProjectDirs::from("", "", "Bup") {
+        project_dirs.data_dir().into()
+    } else {
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::new())
+    };
+
+    path.push("config.json");
+
+    path
+}
+
+impl Config {
+    pub fn load() -> anyhow::Result<Self> {
+        let contents = std::fs::read_to_string(config_path())?;
+
+        Ok(serde_json::from_str(&contents)?)
+    }
+
+    pub fn save(&self) -> anyhow::Result<()> {
+        use std::io::Write;
+        let json = serde_json::to_string_pretty(&self)?;
+
+        let path = config_path();
+        println!("Saving to path: {}", path.display());
+
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+
+        {
+            let mut file = std::fs::File::create(path)?;
+
+            file.write_all(json.as_bytes())?;
+        }
+
+        Ok(())
+    }
+}
+impl Drop for Ui {
+    fn drop(&mut self) {
+        let result = self.config.save();
+        if let Err(e) = result {
+            eprintln!("Error saving state: {}", e);
+        }
+    }
 }
