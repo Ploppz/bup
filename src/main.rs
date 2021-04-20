@@ -74,32 +74,32 @@ pub enum Scene {
         dir_index: usize,
     },
 }
-impl Ui {
-    pub fn enter_overview(&mut self) {
-        self.scene = Scene::Overview {
-            list: self
-                .config
+impl Scene {
+    pub fn overview(config: &Config) -> Scene {
+        Scene::Overview {
+            list: config
                 .directories
                 .iter()
                 .map(|_| ListItemState::default())
                 .collect(),
             new_button: Default::default(),
             selected: None,
-        };
+        }
     }
-    pub fn enter_create(&mut self) {
-        self.scene = Scene::Create {
+    pub fn create() -> Scene {
+        Scene::Create {
             editor: Editor::default(),
-        };
+        }
     }
-    pub fn enter_edit(&mut self, dir_index: usize) {
-        let dir = self.config.directories[dir_index].clone();
-        self.scene = Scene::Edit {
+    pub fn edit(dir_index: usize, config: &Config) -> Scene {
+        let dir = config.directories[dir_index].clone();
+        Scene::Edit {
             editor: Editor::with_directory(dir),
             dir_index,
-        };
+        }
     }
 }
+
 impl Default for Scene {
     fn default() -> Scene {
         Scene::Overview {
@@ -141,8 +141,8 @@ impl Application for Ui {
         };
         (
             Ui {
+                scene: Scene::overview(&config),
                 config,
-                scene: Default::default(),
                 s_scrollable: Default::default(),
             },
             Command::none(),
@@ -156,20 +156,20 @@ impl Application for Ui {
     fn update(&mut self, message: Message, _clip: &mut iced::Clipboard) -> Command<Message> {
         match message {
             Message::ToOverview => {
-                self.enter_overview();
+                self.scene = Scene::overview(&self.config);
                 Command::none()
             }
             Message::NewDir => {
-                self.enter_create();
+                self.scene = Scene::create();
                 Command::none()
             }
             Message::EditDir(index) => {
-                self.enter_edit(index);
+                self.scene = Scene::edit(index, &self.config);
                 Command::none()
             }
             Message::ListItem(i, msg) => match msg {
                 ListItemMessage::Click => {
-                    self.enter_edit(i);
+                    self.scene = Scene::edit(i, &self.config);
                     Command::none()
                 }
             },
@@ -180,20 +180,20 @@ impl Application for Ui {
                             Scene::Create { editor } => {
                                 if let Ok(()) = verify_directory(&editor.directory) {
                                     self.config.directories.push(editor.directory.clone());
-                                    self.enter_overview();
+                                    self.scene = Scene::overview(&self.config);
                                 }
                             }
                             Scene::Edit { editor, dir_index } => {
                                 if let Ok(()) = verify_directory(&editor.directory) {
                                     self.config.directories[*dir_index] = editor.directory.clone();
-                                    self.enter_overview();
+                                    self.scene = Scene::overview(&self.config);
                                 }
                             }
                             _ => panic!(),
                         };
                     }
                     EditorMessage::Cancel => {
-                        self.enter_overview();
+                        self.scene = Scene::overview(&self.config);
                     }
                     _ => (),
                 }
