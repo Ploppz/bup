@@ -156,3 +156,45 @@ impl container::StyleSheet for MenuContainer {
         }
     }
 }
+
+pub struct ListItemHeader {
+    pub selected: bool,
+}
+
+impl ListItemHeader {
+    fn base_color(&self) -> Color {
+        if self.selected {
+            Color::from_rgb(0.2, 0.2, 0.2)
+        } else {
+            Color::from_rgb(0.14, 0.14, 0.14)
+        }
+    }
+    fn highlight_color(&self) -> Color {
+        let b = self.base_color();
+        Color {
+            a: 1.0,
+            r: b.r * 0.9,
+            g: b.g * 0.9,
+            b: b.b * 0.9,
+        }
+    }
+}
+impl button::StyleSheet for ListItemHeader {
+    fn active(&self) -> button::Style {
+        button::Style {
+            background: Some(Background::Color(self.base_color())),
+            border_radius: 5.0,
+            text_color: Color::WHITE,
+            ..button::Style::default()
+        }
+    }
+
+    fn hovered(&self) -> button::Style {
+        let active = self.active();
+        button::Style {
+            shadow_offset: active.shadow_offset + Vector::new(0.0, 1.0),
+            background: Some(Background::Color(self.highlight_color())),
+            ..active
+        }
+    }
+}

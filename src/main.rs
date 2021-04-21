@@ -168,8 +168,25 @@ impl Application for Ui {
                 Command::none()
             }
             Message::ListItem(i, msg) => match msg {
-                ListItemMessage::Click => {
+                ListItemMessage::Edit => {
                     self.scene = Scene::edit(i, &self.config);
+                    Command::none()
+                }
+                ListItemMessage::Expand => {
+                    match self.scene {
+                        Scene::Overview {
+                            ref mut selected, ..
+                        } => {
+                            if selected.is_some() {
+                                *selected = None
+                            } else {
+                                *selected = Some(i)
+                            }
+                        }
+                        // Scene::Overview {selected: None} =>
+                        _ => unreachable!(),
+                    }
+                    // TODO: expand
                     Command::none()
                 }
             },
@@ -215,7 +232,7 @@ impl Application for Ui {
                 new_button,
                 selected,
             } => {
-                let mut directories: Column<Message> = Column::new().spacing(20).push(
+                let mut overview: Column<Message> = Column::new().spacing(20).push(
                     Row::new()
                         .spacing(20)
                         .push(Text::new("BUP").size(H3_SIZE))
@@ -232,14 +249,15 @@ impl Application for Ui {
                     .zip(list.iter_mut())
                     .enumerate()
                 {
-                    directories = directories.push(
+                    let is_selected = selected.map(|s| s == i).unwrap_or(false);
+                    overview = overview.push(
                         state
-                            .view(&directory)
+                            .view(&directory, is_selected)
                             .map(move |msg| Message::ListItem(i, msg)),
                     );
                 }
 
-                Container::new(Scrollable::new(&mut self.s_scrollable).push(directories))
+                Container::new(Scrollable::new(&mut self.s_scrollable).push(overview))
                     .padding(15)
                     .width(Length::Fill)
                     .height(Length::Fill)
@@ -514,17 +532,49 @@ pub enum EditorMessage {
 #[derive(Default, Debug, Clone)]
 pub struct ListItemState {
     s_button: button::State,
+    s_button2: button::State,
 }
 impl ListItemState {
-    pub fn view(&mut self, dir: &Directory) -> Element<ListItemMessage> {
-        Button::new(&mut self.s_button, Text::new(&dir.name).size(TEXT_SIZE))
-            .on_press(ListItemMessage::Click)
-            .into()
+    pub fn view(&mut self, dir: &Directory, selected: bool) -> Element<ListItemMessage> {
+        let header = Row::new()
+            .height(Length::Units(36))
+            .width(Length::Fill)
+            .push(
+                Container::new(Text::new(&dir.name).size(TEXT_SIZE))
+                    .align_y(Align::Center)
+                    .align_x(Align::Start)
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            )
+            .push(
+                Container::new(
+                    Button::new(&mut self.s_button2, Icon::Edit.text())
+                        .padding(6)
+                        .style(style::Button::Icon {
+                            hover_color: Color::WHITE,
+                        })
+                        .on_press(ListItemMessage::Edit),
+                )
+                .align_x(Align::End)
+                .width(Length::Fill),
+            );
+        let mut column = Column::new();
+        column = column.push(
+            Button::new(&mut self.s_button, header)
+                .on_press(ListItemMessage::Expand)
+                .style(style::ListItemHeader { selected }),
+        );
+        if selected {
+            column = column.push(Text::new("Details goes here"));
+        }
+
+        column.into()
     }
 }
 #[derive(Clone, Debug)]
 pub enum ListItemMessage {
-    Click,
+    Expand,
+    Edit,
 }
 
 fn verify_directory(dir: &Directory) -> Result<(), String> {
