@@ -3,6 +3,7 @@ use iced::{Align, Button, Column, Container, Element, PickList, Row, Scrollable,
 use iced::{
     Application, Background, Color, Command, Font, HorizontalAlignment, Length, Settings, Size,
 };
+use rdedup_lib::Repo;
 // use iced_graphics::{Backend, Renderer};
 use iced_native::{layout::Node, Overlay, Point, Widget};
 use iced_wgpu::{Backend, Renderer};
@@ -10,6 +11,7 @@ use itertools::izip;
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, time::Duration};
 
+mod backup;
 mod ext;
 mod icon;
 mod path;
@@ -52,6 +54,8 @@ mod config {
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub enum DuplicationKind {
         Disk { path: PathBuf },
+        // TODO S3
+        // TODO Syncthing?
     }
 }
 
@@ -65,6 +69,7 @@ pub enum Scene {
         list: Vec<ListItemState>,
         new_button: button::State,
         selected: Option<usize>,
+        s_open_settings: button::State,
     },
     Create {
         editor: Editor,
@@ -72,6 +77,9 @@ pub enum Scene {
     Edit {
         editor: Editor,
         dir_index: usize,
+    },
+    Settings {
+        s_back_button: button::State,
     },
 }
 impl Scene {
@@ -84,6 +92,7 @@ impl Scene {
                 .collect(),
             new_button: Default::default(),
             selected: None,
+            s_open_settings: Default::default()
         }
     }
     pub fn create() -> Scene {
@@ -98,25 +107,18 @@ impl Scene {
             dir_index,
         }
     }
-}
-
-impl Default for Scene {
-    fn default() -> Scene {
-        Scene::Overview {
-            list: vec![],
-            new_button: Default::default(),
-            selected: None,
+    pub fn settings() -> Scene {
+        Scene::Settings {
+            s_back_button: Default::default(),
         }
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
 pub struct Ui {
     config: Config,
-    #[serde(skip)]
-    scene: Scene,
 
-    #[serde(skip)]
+    rdedup: Option<Repo>,
+    scene: Scene,
     s_scrollable: scrollable::State,
 }
 
@@ -127,6 +129,7 @@ pub enum Message {
     EditDir(usize),
     ListItem(usize, ListItemMessage),
     Editor(EditorMessage),
+    OpenSettings,
 }
 
 impl Application for Ui {
@@ -143,7 +146,8 @@ impl Application for Ui {
             Ui {
                 scene: Scene::overview(&config),
                 config,
-                s_scrollable: Default::default(),
+                rdedup: None,
+                s_scrollable: Default::default()
             },
             Command::none(),
         )
@@ -222,6 +226,10 @@ impl Application for Ui {
                     _ => Command::none(),
                 }
             }
+            Message::OpenSettings => {
+                self.scene = Scene::settings();
+                Command::none()
+            }
         }
     }
 
@@ -231,17 +239,31 @@ impl Application for Ui {
                 list,
                 new_button,
                 selected,
+                s_open_settings
             } => {
-                let mut overview: Column<Message> = Column::new().spacing(20).push(
-                    Row::new()
+
+                let header = Row::new()
                         .spacing(20)
                         .push(Text::new("BUP").size(H3_SIZE))
                         .push(
                             Button::new(new_button, Text::new("NEW BUP").size(TEXT_SIZE - 4))
                                 .style(style::Button::Primary)
                                 .on_press(Message::NewDir),
-                        ),
-                );
+                        )
+                        .push(
+                            Container::new(
+                                Button::new(s_open_settings, Icon::Settings.text())
+                                    .padding(4)
+                                    .style(style::Button::Icon {
+                                        hover_color: Color::WHITE,
+                                    })
+                                    .on_press(Message::OpenSettings),
+                            )
+                            .width(Length::Fill)
+                            .align_x(Align::End),
+                        );
+
+                let mut overview: Column<Message> = Column::new().spacing(20);
                 for (i, (directory, state)) in self
                     .config
                     .directories
@@ -257,11 +279,11 @@ impl Application for Ui {
                     );
                 }
 
-                Container::new(Scrollable::new(&mut self.s_scrollable).push(overview))
-                    .padding(15)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .style(style::MenuContainer)
+                Container::new(
+                Column::new()
+                    .push(header)
+                    .push(Scrollable::new(&mut self.s_scrollable).push(overview))
+                )
             }
             Scene::Create { editor } | Scene::Edit { editor, .. } => {
                 // Center the editor
@@ -271,12 +293,23 @@ impl Application for Ui {
                     .width(Length::Fill)
                     .height(Length::Fill)
             }
+            Scene::Settings { s_back_button } => {
+                // TODO
+                Container::new(
+                    Column::new().push(
+                        Button::new(s_back_button, Text::new("< BACK").size(TEXT_SIZE - 4))
+                            .style(style::Button::Primary)
+                            .on_press(Message::ToOverview),
+                    ),
+                )
+            }
         };
         // To apply a global style
         Container::new(w)
-            .style(style::AppContainer)
+            .style(style::MenuContainer)
             .width(Length::Fill)
             .height(Length::Fill)
+        .padding(15)
             .into()
     }
 }
@@ -565,7 +598,12 @@ impl ListItemState {
                 .style(style::ListItemHeader { selected }),
         );
         if selected {
-            column = column.push(Text::new("Details goes here"));
+            column = column.push(
+                Container::new(Text::new("Details goes here"))
+                    .style(style::ListItemExpanded)
+                    .width(Length::Fill)
+                    .padding(10),
+            );
         }
 
         column.into()

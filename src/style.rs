@@ -198,3 +198,16 @@ impl button::StyleSheet for ListItemHeader {
         }
     }
 }
+
+pub struct ListItemExpanded;
+impl container::StyleSheet for ListItemExpanded {
+    fn style(&self) -> container::Style {
+        container::Style {
+            text_color: Some(Color::from_rgb(0.9, 0.9, 0.9)),
+            background: None,
+            border_radius: 2.0,
+            border_width: 4.0,
+            border_color: Color::from_rgb(0.2, 0.2, 0.2),
+        }
+    }
+}
