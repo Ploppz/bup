@@ -9,6 +9,7 @@ pub enum Icon {
     Edit,
     New,
     Settings,
+    Repo,
 }
 impl Icon {
     pub fn text(&self) -> Text {
@@ -36,6 +37,7 @@ impl Display for Icon {
                 Icon::Edit => '\u{f044}',
                 Icon::New => '\u{f44d}', // TODO
                 Icon::Settings => '\u{f992}',
+                Icon::Repo => '\u{f401}',
             }
         )
     }

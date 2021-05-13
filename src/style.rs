@@ -1,5 +1,6 @@
 //! Copied from the `todos` example
-use iced::{button, container, text_input, Background, Color, Vector};
+use iced::{Background, Color, Vector};
+use iced_graphics::{button, container, overlay::menu, pick_list, text_input};
 
 pub const PRIMARY_COLOR: Color = Color::from_rgb(0.2, 0.6, 0.2);
 
@@ -208,6 +209,43 @@ impl container::StyleSheet for ListItemExpanded {
             border_radius: 2.0,
             border_width: 4.0,
             border_color: Color::from_rgb(0.2, 0.2, 0.2),
+        }
+    }
+}
+
+pub struct Dropdown;
+impl pick_list::StyleSheet for Dropdown {
+    fn menu(&self) -> menu::Style {
+        menu::Style {
+            .. Default::default()
+            // text_color: Color,
+            // background: Background,
+            // border_width: f32,
+            // border_color: Color,
+            // selected_text_color: Color,
+            // selected_background: Background,
+        }
+    }
+    fn active(&self) -> pick_list::Style {
+        pick_list::Style {
+            text_color: Color::WHITE,
+            background: Background::Color(Color::TRANSPARENT),
+            border_color: Color::TRANSPARENT,
+            border_radius: 6.0,
+            // border_width: 3.0,
+            ..Default::default()
+            // border_radius: f32,
+            // border_width: f32,
+            // border_color: Color,
+            // icon_size: f32,
+        }
+    }
+    fn hovered(&self) -> pick_list::Style {
+        let active = self.active();
+        pick_list::Style {
+            // border_color: PRIMARY_COLOR,
+            background: Background::Color(GREY),
+            ..active
         }
     }
 }

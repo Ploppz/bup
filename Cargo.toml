@@ -19,6 +19,7 @@ slog = "2.7.0"
 anyhow = "1.0"
 itertools = "0.10.0"
 directories-next = "2"
+uuid = { version = "0.8.2", features = ["v4", "serde"] }
 
 tokio = { version = "1.2", features = ["rt", "fs", "io-util", "time"] }
 
