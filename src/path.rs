@@ -1,9 +1,6 @@
 use crate::style;
-use iced::{button, pick_list, text_input};
-use iced::{
-    Align, Button, Column, Command, Element, Length, PickList, Row, Sandbox, Settings, Text,
-    TextInput,
-};
+use iced::button;
+use iced::{Button, Command, Element, Length, Row, Text};
 use nfd::Response;
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -75,14 +72,14 @@ impl FilePicker {
                 Ok(path) => Message::Path(path),
                 Err(e) => Message::Error(e.to_string()),
             }),
-            Message::Path(path) => Command::none(),
+            Message::Path(_) => Command::none(),
             _ => Command::none(),
         }
     }
     pub fn view(&mut self, path: Option<&Path>, text_size: u16) -> Element<Message> {
         let text = match path {
             Some(path) => path.display().to_string(),
-            None => format!("No folder selected"),
+            None => "Select folder".to_string(),
         };
         Row::new()
             .width(Length::Fill)
