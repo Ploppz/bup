@@ -118,8 +118,8 @@ impl text_input::StyleSheet for TextInput {
     }
 }
 
-pub struct EditorContainer;
-impl container::StyleSheet for EditorContainer {
+pub struct TargetEditorContainer;
+impl container::StyleSheet for TargetEditorContainer {
     fn style(&self) -> container::Style {
         container::Style {
             text_color: Some(Color::from_rgb(1.0, 1.0, 1.0)),

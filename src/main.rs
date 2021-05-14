@@ -7,17 +7,17 @@ use std::{path::PathBuf, time::Duration};
 use uuid::Uuid;
 
 mod backup;
-mod editor;
 mod ext;
 mod icon;
 mod path;
 mod style;
+mod target_editor;
 mod util;
 
-pub use editor::*;
 pub use ext::*;
 pub use icon::Icon;
 pub use path::FilePicker;
+pub use target_editor::*;
 pub use util::*;
 
 pub const TEXT_SIZE: u16 = 20;
@@ -119,7 +119,7 @@ pub enum Scene {
         s_repo_pick_list: pick_list::State<Opt<RepoOption>>,
     },
     CreateTarget {
-        editor: Editor,
+        editor: TargetEditor,
     },
     CreateRepo {
         name: String,
@@ -131,8 +131,8 @@ pub enum Scene {
         s_name: text_input::State,
         s_home: FilePicker,
     },
-    Edit {
-        editor: Editor,
+    EditTarget {
+        editor: TargetEditor,
         dir_index: usize,
     },
     Settings {
@@ -155,7 +155,7 @@ impl Scene {
     }
     pub fn create_directory() -> Scene {
         Scene::CreateTarget {
-            editor: Editor::default(),
+            editor: TargetEditor::default(),
         }
     }
     pub fn create_repo() -> Scene {
@@ -172,8 +172,8 @@ impl Scene {
     }
     pub fn edit(dir_index: usize, config: &Config) -> Scene {
         let dir = config.targets[dir_index].clone();
-        Scene::Edit {
-            editor: Editor::with_target(dir),
+        Scene::EditTarget {
+            editor: TargetEditor::with_target(dir),
             dir_index,
         }
     }
@@ -196,7 +196,7 @@ pub enum Message {
     NewDir,
     EditDir(usize),
     ListItem(usize, ListItemMessage),
-    Editor(EditorMessage),
+    TargetEditor(TargetEditorMessage),
     OpenSettings,
     PickRepo(Opt<RepoOption>),
 
@@ -269,9 +269,9 @@ impl Application for Ui {
                     Command::none()
                 }
             },
-            Message::Editor(msg) => {
+            Message::TargetEditor(msg) => {
                 match msg {
-                    EditorMessage::Save => {
+                    TargetEditorMessage::Save => {
                         match &self.scene {
                             Scene::CreateTarget { editor } => {
                                 if let Ok(()) = verify_target(&editor.target) {
@@ -279,7 +279,7 @@ impl Application for Ui {
                                     self.scene = Scene::overview(&self.config);
                                 }
                             }
-                            Scene::Edit { editor, dir_index } => {
+                            Scene::EditTarget { editor, dir_index } => {
                                 if let Ok(()) = verify_target(&editor.target) {
                                     self.config.targets[*dir_index] = editor.target.clone();
                                     self.scene = Scene::overview(&self.config);
@@ -288,14 +288,14 @@ impl Application for Ui {
                             _ => panic!(),
                         };
                     }
-                    EditorMessage::Cancel => {
+                    TargetEditorMessage::Cancel => {
                         self.scene = Scene::overview(&self.config);
                     }
                     _ => (),
                 }
                 match &mut self.scene {
-                    Scene::CreateTarget { editor, .. } | Scene::Edit { editor, .. } => {
-                        editor.update(msg).map(Message::Editor)
+                    Scene::CreateTarget { editor, .. } | Scene::EditTarget { editor, .. } => {
+                        editor.update(msg).map(Message::TargetEditor)
                     }
                     // Possible because scene might change above
                     _ => Command::none(),
@@ -429,9 +429,9 @@ impl Application for Ui {
                         .push(Scrollable::new(&mut self.s_scrollable).push(overview)),
                 )
             }
-            Scene::CreateTarget { editor } | Scene::Edit { editor, .. } => {
+            Scene::CreateTarget { editor } | Scene::EditTarget { editor, .. } => {
                 // Center the editor
-                Container::new(editor.view().map(Message::Editor))
+                Container::new(editor.view().map(Message::TargetEditor))
                     .padding(50)
                     .align_x(Align::Center)
                     .width(Length::Fill)

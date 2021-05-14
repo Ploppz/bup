@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Debug, Clone)]
-pub enum EditorMessage {
+pub enum TargetEditorMessage {
     SetName(String),
 
     NewSource,
@@ -20,7 +20,7 @@ pub enum EditorMessage {
 }
 
 #[derive(Default)]
-pub struct Editor {
+pub struct TargetEditor {
     pub target: Target,
     pub error: Option<String>,
 
@@ -38,7 +38,7 @@ pub struct Editor {
 
     s_scrollable: scrollable::State,
 }
-impl Editor {
+impl TargetEditor {
     pub fn with_target(target: Target) -> Self {
         Self {
             // Review; One must manually make sure that the lists of states have the same length as
@@ -51,7 +51,7 @@ impl Editor {
             ..Default::default()
         }
     }
-    pub fn view(&mut self) -> Element<'_, EditorMessage> {
+    pub fn view(&mut self) -> Element<'_, TargetEditorMessage> {
         let mut x = Column::new()
             .padding(20)
             .spacing(20)
@@ -62,7 +62,7 @@ impl Editor {
                         &mut self.s_name,
                         "Name",
                         &self.target.name,
-                        EditorMessage::SetName,
+                        TargetEditorMessage::SetName,
                     )
                     .style(style::TextInput)
                     .size(H3_SIZE),
@@ -79,7 +79,7 @@ impl Editor {
                                 .style(style::Button::Icon {
                                     hover_color: Color::WHITE,
                                 })
-                                .on_press(EditorMessage::NewSource),
+                                .on_press(TargetEditorMessage::NewSource),
                         ),
                     );
                     for (i, (source, del_button, file_picker)) in izip!(
@@ -94,11 +94,11 @@ impl Editor {
                                 .push(
                                     file_picker
                                         .view(source.as_ref().map(|x| x.as_path()), TEXT_SIZE)
-                                        .map(move |msg| EditorMessage::Source(i, msg)),
+                                        .map(move |msg| TargetEditorMessage::Source(i, msg)),
                                 )
                                 .push(
                                     Button::new(del_button, Icon::Delete.text())
-                                        .on_press(EditorMessage::DelSource(i))
+                                        .on_press(TargetEditorMessage::DelSource(i))
                                         .padding(0)
                                         .style(style::Button::Icon {
                                             hover_color: Color::from_rgb(0.7, 0.2, 0.2),
@@ -121,7 +121,7 @@ impl Editor {
                                         hover_color: Color::WHITE,
                                     })
                                     .padding(BUTTON_PAD)
-                                    .on_press(EditorMessage::NewExclude),
+                                    .on_press(TargetEditorMessage::NewExclude),
                             ),
                         )
                         .push(
@@ -141,14 +141,18 @@ impl Editor {
                                                         state,
                                                         "Exclude string",
                                                         exclude,
-                                                        move |s| EditorMessage::SetExclude(i, s),
+                                                        move |s| {
+                                                            TargetEditorMessage::SetExclude(i, s)
+                                                        },
                                                     )
                                                     .style(style::TextInput)
                                                     .size(TEXT_SIZE),
                                                 )
                                                 .push(
                                                     Button::new(del_button, Icon::Delete.text())
-                                                        .on_press(EditorMessage::DelExclude(i))
+                                                        .on_press(TargetEditorMessage::DelExclude(
+                                                            i,
+                                                        ))
                                                         .padding(0)
                                                         .style(style::Button::Icon {
                                                             hover_color: Color::from_rgb(
@@ -174,7 +178,7 @@ impl Editor {
                             )
                             .padding(8)
                             .style(style::Button::Text)
-                            .on_press(EditorMessage::Cancel),
+                            .on_press(TargetEditorMessage::Cancel),
                         )
                         .push(
                             Button::new(
@@ -183,7 +187,7 @@ impl Editor {
                             )
                             .padding(8)
                             .style(style::Button::Primary)
-                            .on_press(EditorMessage::Save),
+                            .on_press(TargetEditorMessage::Save),
                         ),
                 )
                 .width(Length::Fill)
@@ -193,50 +197,50 @@ impl Editor {
             x = x.push(Text::new(error).color(Color::from_rgb(0.5, 0.0, 0.0)))
         }
         let x = Container::new(x)
-            .style(style::EditorContainer)
+            .style(style::TargetEditorContainer)
             .width(Length::Fill)
             .max_width(1000)
             .height(Length::Shrink);
         let x = Scrollable::new(&mut self.s_scrollable).push(x);
         x.into()
     }
-    pub fn update(&mut self, message: EditorMessage) -> Command<EditorMessage> {
+    pub fn update(&mut self, message: TargetEditorMessage) -> Command<TargetEditorMessage> {
         match message {
-            EditorMessage::SetName(name) => self.target.name = name,
-            EditorMessage::NewSource => {
+            TargetEditorMessage::SetName(name) => self.target.name = name,
+            TargetEditorMessage::NewSource => {
                 self.target.sources.push(Default::default());
                 self.s_delete_source_button.push(Default::default());
                 // Review; I forgot once to put the following line here
                 // Makes the UI malfunction due to how I izip! the iterators
                 self.s_source.push(Default::default());
             }
-            EditorMessage::Source(i, msg) => {
+            TargetEditorMessage::Source(i, msg) => {
                 if let path::Message::Path(ref path) = msg {
                     self.target.sources[i] = Some(path.clone());
                 }
                 return self.s_source[i]
                     .update(msg)
-                    .map(move |msg| EditorMessage::Source(i, msg));
+                    .map(move |msg| TargetEditorMessage::Source(i, msg));
             }
-            EditorMessage::DelSource(i) => {
+            TargetEditorMessage::DelSource(i) => {
                 self.target.sources.remove(i);
             }
-            EditorMessage::NewExclude => {
+            TargetEditorMessage::NewExclude => {
                 self.target.excludes.push(Default::default());
                 self.s_exclude.push(Default::default());
                 self.s_delete_exclude_button.push(Default::default());
             }
-            EditorMessage::SetExclude(i, exclude) => self.target.excludes[i] = exclude,
-            EditorMessage::DelExclude(i) => {
+            TargetEditorMessage::SetExclude(i, exclude) => self.target.excludes[i] = exclude,
+            TargetEditorMessage::DelExclude(i) => {
                 self.target.excludes.remove(i);
             }
-            EditorMessage::Save => {
+            TargetEditorMessage::Save => {
                 // Show eventual error message
                 if let Err(error) = verify_target(&self.target) {
                     self.error = Some(error);
                 }
             }
-            EditorMessage::Cancel => (),
+            TargetEditorMessage::Cancel => (),
         }
         Command::none()
     }
