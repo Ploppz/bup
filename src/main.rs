@@ -382,6 +382,12 @@ impl Application for Ui {
                     .clone()
                     .and_then(|selected| options.iter().find(|opt| opt.value == selected.value))
                     .cloned();
+
+                let mut button = Button::new(new_button, Text::new("NEW BUP").size(TEXT_SIZE - 4))
+                    .style(style::Button::Primary);
+                if self.config.selected_repo.is_some() {
+                    button = button.on_press(Message::NewDir);
+                }
                 let mut header = Row::new()
                     .spacing(20)
                     .push(Text::new("BUP").size(H3_SIZE))
@@ -390,15 +396,9 @@ impl Application for Ui {
                             .font(ICONS)
                             .width(Length::Units(150))
                             .style(style::Dropdown),
-                    );
+                    )
+                    .push(button);
 
-                if self.config.selected_repo.is_some() {
-                    header = header.push(
-                        Button::new(new_button, Text::new("NEW BUP").size(TEXT_SIZE - 4))
-                            .style(style::Button::Primary)
-                            .on_press(Message::NewDir),
-                    );
-                }
                 header = header.push(
                     Container::new(
                         Row::new().push(
@@ -460,14 +460,11 @@ impl Application for Ui {
                         ),
                     )
                     .push(
-                        Row::new()
-                            .spacing(8)
-                            .push(Text::new("Home directory"))
-                            .push(
-                                s_home
-                                    .view(home.as_ref().map(|x| x.as_path()), TEXT_SIZE, BUTTON_PAD)
-                                    .map(Message::RepoHome),
-                            ),
+                        Row::new().spacing(8).push(Text::new("RDEDUP_HOME:")).push(
+                            s_home
+                                .view(home.as_ref().map(|x| x.as_path()), TEXT_SIZE)
+                                .map(Message::RepoHome),
+                        ),
                     )
                     .push(
                         Container::new(
@@ -592,11 +589,7 @@ impl Editor {
                             Row::new()
                                 .push(
                                     file_picker
-                                        .view(
-                                            source.as_ref().map(|x| x.as_path()),
-                                            TEXT_SIZE,
-                                            BUTTON_PAD,
-                                        )
+                                        .view(source.as_ref().map(|x| x.as_path()), TEXT_SIZE)
                                         .map(move |msg| EditorMessage::Source(i, msg)),
                                 )
                                 .push(

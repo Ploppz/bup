@@ -79,12 +79,7 @@ impl FilePicker {
             _ => Command::none(),
         }
     }
-    pub fn view(
-        &mut self,
-        path: Option<&Path>,
-        text_size: u16,
-        button_pad: u16,
-    ) -> Element<Message> {
+    pub fn view(&mut self, path: Option<&Path>, text_size: u16) -> Element<Message> {
         let text = match path {
             Some(path) => path.display().to_string(),
             None => format!("No folder selected"),
@@ -93,7 +88,7 @@ impl FilePicker {
             .width(Length::Fill)
             .push(
                 Button::new(&mut self.s_button, Text::new(text).size(text_size))
-                    .padding(button_pad)
+                    .padding(0)
                     .style(style::Button::Path)
                     .on_press(Message::SelectPath),
             )

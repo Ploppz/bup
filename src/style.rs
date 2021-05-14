@@ -45,7 +45,7 @@ impl button::StyleSheet for Button {
             },
             Button::Path => button::Style {
                 background: None,
-                text_color: Color::WHITE,
+                text_color: Color::from_rgb(0.8, 0.8, 0.8),
                 ..button::Style::default()
             },
             Button::Item => button::Style {
