@@ -446,49 +446,55 @@ impl Application for Ui {
                 ref mut s_name,
                 ref mut s_home,
             } => Container::new(
-                Column::new()
-                    .padding(20)
-                    .spacing(20)
-                    .push(
-                        Row::new().spacing(8).push(Icon::Repo.h3()).push(
-                            TextInput::new(s_name, "Repo name", &name, Message::SetRepoName)
-                                .style(style::TextInput)
-                                .size(H3_SIZE),
-                        ),
-                    )
-                    .push(
-                        Row::new().spacing(8).push(Text::new("RDEDUP_HOME:")).push(
-                            s_home
-                                .view(home.as_ref().map(|x| x.as_path()), TEXT_SIZE)
-                                .map(Message::RepoHome),
-                        ),
-                    )
-                    .push(
-                        Container::new(
-                            Row::new()
-                                .spacing(10)
-                                .push(
-                                    Button::new(
-                                        s_cancel_button,
-                                        Text::new("CANCEL").size(TEXT_SIZE - 4),
-                                    )
-                                    .padding(8)
-                                    .style(style::Button::Text)
-                                    .on_press(Message::ToOverview),
-                                )
-                                .push(
-                                    Button::new(
-                                        s_save_button,
-                                        Text::new("SAVE").size(TEXT_SIZE - 4),
-                                    )
-                                    .padding(8)
-                                    .style(style::Button::Primary)
-                                    .on_press(Message::SaveRepo),
-                                ),
+                Container::new(
+                    Column::new()
+                        .padding(20)
+                        .spacing(20)
+                        .push(
+                            Row::new().spacing(8).push(Icon::Repo.h3()).push(
+                                TextInput::new(s_name, "Repo name", &name, Message::SetRepoName)
+                                    .style(style::TextInput)
+                                    .size(H3_SIZE),
+                            ),
                         )
-                        .width(Length::Fill)
-                        .align_x(Align::End),
-                    ),
+                        .push(
+                            Row::new().spacing(8).push(Text::new("RDEDUP_HOME:")).push(
+                                s_home
+                                    .view(home.as_ref().map(|x| x.as_path()), TEXT_SIZE)
+                                    .map(Message::RepoHome),
+                            ),
+                        )
+                        .push(
+                            Container::new(
+                                Row::new()
+                                    .spacing(10)
+                                    .push(
+                                        Button::new(
+                                            s_cancel_button,
+                                            Text::new("CANCEL").size(TEXT_SIZE - 4),
+                                        )
+                                        .padding(8)
+                                        .style(style::Button::Text)
+                                        .on_press(Message::ToOverview),
+                                    )
+                                    .push(
+                                        Button::new(
+                                            s_save_button,
+                                            Text::new("SAVE").size(TEXT_SIZE - 4),
+                                        )
+                                        .padding(8)
+                                        .style(style::Button::Primary)
+                                        .on_press(Message::SaveRepo),
+                                    ),
+                            )
+                            .width(Length::Fill)
+                            .align_x(Align::End),
+                        ),
+                )
+                .style(style::DialogContainer)
+                .width(Length::Fill)
+                .max_width(1000)
+                .height(Length::Shrink),
             )
             .padding(50)
             .align_x(Align::Center)

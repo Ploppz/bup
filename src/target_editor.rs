@@ -197,7 +197,7 @@ impl TargetEditor {
             x = x.push(Text::new(error).color(Color::from_rgb(0.5, 0.0, 0.0)))
         }
         let x = Container::new(x)
-            .style(style::TargetEditorContainer)
+            .style(style::DialogContainer)
             .width(Length::Fill)
             .max_width(1000)
             .height(Length::Shrink);
