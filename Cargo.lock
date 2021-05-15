@@ -246,12 +246,14 @@ name = "bup"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ctrlc",
  "directories-next",
  "iced",
  "iced_graphics",
  "iced_native",
  "iced_wgpu",
  "itertools",
+ "lazy_static",
  "nfd",
  "rdedup-lib",
  "serde",
@@ -750,6 +752,16 @@ checksum = "0999b4ff4d3446d4ddb19a63e9e00c1876e75cd7000d20e57a693b4b3f08d958"
 dependencies = [
  "constant_time_eq",
  "generic-array",
+]
+
+[[package]]
+name = "ctrlc"
+version = "3.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "232295399409a8b7ae41276757b5a1cc21032848d42bff2352261f958b3ca29a"
+dependencies = [
+ "nix 0.20.0",
+ "winapi 0.3.9",
 ]
 
 [[package]]

@@ -1,9 +1,15 @@
 use iced::{button, pick_list, scrollable, text_input};
 use iced::{Align, Button, Column, Container, Element, PickList, Row, Scrollable, Text, TextInput};
-use iced::{Application, Color, Command, Font, HorizontalAlignment, Length, Settings};
+use iced::{
+    Application, Color, Command, Font, HorizontalAlignment, Length, Settings, Subscription,
+};
 use itertools::izip;
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::{atomic::AtomicBool, Arc},
+    time::{Duration, Instant},
+};
 use uuid::Uuid;
 
 mod backup;
@@ -25,6 +31,10 @@ pub const H3_SIZE: u16 = 24;
 pub const BUTTON_PAD: u16 = 2;
 
 pub type RepoSettings = rdedup_lib::settings::Repo;
+
+lazy_static::lazy_static! {
+    pub static ref SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
+}
 
 pub use config::*;
 mod config {
@@ -105,6 +115,10 @@ fn repo_options(repos: &[config::Repo]) -> Vec<Opt<RepoOption>> {
 }
 
 pub fn main() -> iced::Result {
+    ctrlc::set_handler(move || {
+        SHOULD_EXIT.store(true, std::sync::atomic::Ordering::Relaxed);
+    })
+    .expect("Error setting Ctrl-C handler");
     Ui::run(Settings::default())
 }
 
@@ -192,6 +206,8 @@ pub struct Ui {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// Only used to check if application should exit
+    Tick(Instant),
     ToOverview,
     NewDir,
     EditDir(usize),
@@ -227,12 +243,20 @@ impl Application for Ui {
         )
     }
 
+    fn should_exit(&self) -> bool {
+        SHOULD_EXIT.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    fn subscription(&self) -> Subscription<Message> {
+        iced::time::every(Duration::from_secs(1)).map(Message::Tick)
+    }
+
     fn title(&self) -> String {
         String::from("Ui - Iced")
     }
 
     fn update(&mut self, message: Message, _clip: &mut iced::Clipboard) -> Command<Message> {
         match message {
+            Message::Tick(_) => Command::none(),
             Message::ToOverview => {
                 self.scene = Scene::overview(&self.config);
                 Command::none()
