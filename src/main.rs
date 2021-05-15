@@ -59,6 +59,7 @@ mod config {
 
     #[derive(Clone, Debug, Serialize, Deserialize, Default)]
     pub struct Target {
+        pub repo: Uuid,
         pub name: String,
         /// Paths to include in the backup
         pub sources: Vec<Option<PathBuf>>,
@@ -100,6 +101,14 @@ impl<T> std::fmt::Display for Opt<T> {
 pub enum RepoOption {
     New,
     Select(Uuid),
+}
+impl RepoOption {
+    fn id(&self) -> Option<Uuid> {
+        match self {
+            RepoOption::New => None,
+            RepoOption::Select(id) => Some(*id),
+        }
+    }
 }
 
 fn repo_options(repos: &[config::Repo]) -> Vec<Opt<RepoOption>> {
@@ -167,9 +176,9 @@ impl Scene {
             s_repo_pick_list: Default::default(),
         }
     }
-    pub fn create_directory() -> Scene {
+    pub fn create_directory(repo_id: Uuid) -> Scene {
         Scene::CreateTarget {
-            editor: TargetEditor::default(),
+            editor: TargetEditor::new_target(repo_id),
         }
     }
     pub fn create_repo() -> Scene {
@@ -262,7 +271,13 @@ impl Application for Ui {
                 Command::none()
             }
             Message::NewDir => {
-                self.scene = Scene::create_directory();
+                if let Some(Opt {
+                    value: RepoOption::Select(repo_id),
+                    ..
+                }) = self.config.selected_repo
+                {
+                    self.scene = Scene::create_directory(repo_id);
+                }
                 Command::none()
             }
             Message::EditDir(index) => {
@@ -396,13 +411,7 @@ impl Application for Ui {
                 s_open_settings,
                 s_repo_pick_list,
             } => {
-                let options = repo_options(&self.config.repos);
-                let selected = self
-                    .config
-                    .selected_repo
-                    .clone()
-                    .and_then(|selected| options.iter().find(|opt| opt.value == selected.value))
-                    .cloned();
+                let repo_options = repo_options(&self.config.repos);
 
                 let mut button = Button::new(new_button, Text::new("NEW BUP").size(TEXT_SIZE - 4))
                     .style(style::Button::Primary);
@@ -413,10 +422,15 @@ impl Application for Ui {
                     .spacing(20)
                     .push(Text::new("BUP").size(H3_SIZE))
                     .push(
-                        PickList::new(s_repo_pick_list, options, selected, Message::PickRepo)
-                            .font(ICONS)
-                            .width(Length::Units(150))
-                            .style(style::Dropdown),
+                        PickList::new(
+                            s_repo_pick_list,
+                            repo_options,
+                            self.config.selected_repo.clone(),
+                            Message::PickRepo,
+                        )
+                        .font(ICONS)
+                        .width(Length::Units(150))
+                        .style(style::Dropdown),
                     )
                     .push(button);
 
@@ -435,16 +449,25 @@ impl Application for Ui {
                     .align_x(Align::End),
                 );
 
+                let selected_repo_id = self
+                    .config
+                    .selected_repo
+                    .clone()
+                    .and_then(|opt| opt.value.id());
                 let mut overview: Column<Message> = Column::new().spacing(20);
                 for (i, (target, state)) in
                     self.config.targets.iter().zip(list.iter_mut()).enumerate()
                 {
-                    let is_selected = selected_target.map(|s| s == i).unwrap_or(false);
-                    overview = overview.push(
-                        state
-                            .view(&target, is_selected)
-                            .map(move |msg| Message::ListItem(i, msg)),
-                    );
+                    if let Some(selected_repo_id) = selected_repo_id {
+                        if selected_repo_id == target.repo {
+                            let is_selected = selected_target.map(|s| s == i).unwrap_or(false);
+                            overview = overview.push(
+                                state
+                                    .view(&target, is_selected)
+                                    .map(move |msg| Message::ListItem(i, msg)),
+                            );
+                        }
+                    }
                 }
 
                 Container::new(

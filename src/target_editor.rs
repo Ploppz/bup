@@ -39,6 +39,15 @@ pub struct TargetEditor {
     s_scrollable: scrollable::State,
 }
 impl TargetEditor {
+    pub fn new_target(repo_id: Uuid) -> Self {
+        Self {
+            target: Target {
+                repo: repo_id,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
     pub fn with_target(target: Target) -> Self {
         Self {
             // Review; One must manually make sure that the lists of states have the same length as
