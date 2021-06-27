@@ -1,3 +1,4 @@
+#![feature(try_blocks)]
 use iced::{button, pick_list, scrollable, text_input};
 use iced::{Align, Button, Column, Container, Element, PickList, Row, Scrollable, Text, TextInput};
 use iced::{
@@ -5,17 +6,18 @@ use iced::{
 };
 use itertools::izip;
 use serde::{Deserialize, Serialize};
+use slog::Logger;
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{atomic::AtomicBool, Arc},
     time::{Duration, Instant},
 };
 use uuid::Uuid;
 
-mod backup;
 mod ext;
 mod icon;
 mod path;
+mod rdedup;
 mod style;
 mod target_editor;
 mod util;
@@ -147,12 +149,16 @@ pub enum Scene {
     CreateRepo {
         name: String,
         home: Option<PathBuf>,
+        passphrase: String,
+        passphrase2: String,
 
         error: Option<String>,
         s_cancel_button: button::State,
         s_save_button: button::State,
         s_name: text_input::State,
         s_home: FilePicker,
+        s_pass1: text_input::State,
+        s_pass2: text_input::State,
     },
     EditTarget {
         editor: TargetEditor,
@@ -185,12 +191,16 @@ impl Scene {
         Scene::CreateRepo {
             name: String::new(),
             home: None,
+            passphrase: String::new(),
+            passphrase2: String::new(),
             error: None,
 
             s_cancel_button: Default::default(),
             s_save_button: Default::default(),
             s_name: Default::default(),
             s_home: Default::default(),
+            s_pass1: Default::default(),
+            s_pass2: Default::default(),
         }
     }
     pub fn edit(dir_index: usize, config: &Config) -> Scene {
@@ -210,6 +220,7 @@ impl Scene {
 pub struct Ui {
     config: Config,
     scene: Scene,
+    log: Logger,
     s_scrollable: scrollable::State,
 }
 
@@ -228,8 +239,11 @@ pub enum Message {
     // Repo editor (maybe make a new component)
     SetRepoName(String),
     SetRepoHome(PathBuf),
+    SetPassphrase1(String),
+    SetPassphrase2(String),
     SaveRepo,
     RepoHome(path::Message),
+    RepoSaveResult(Result<Redacted<rdedup_lib::Repo>, String>),
 }
 
 impl Application for Ui {
@@ -242,11 +256,21 @@ impl Application for Ui {
         } else {
             Config::default()
         };
+        let log = {
+            use slog::*;
+            use slog_async::*;
+            use slog_term::*;
+            let decorator = TermDecorator::new().build();
+            let drain = FullFormat::new(decorator).build().fuse();
+            let drain = Async::new(drain).build().fuse();
+            Logger::root(drain, o!())
+        };
         (
             Ui {
                 scene: Scene::overview(&config),
                 config,
                 s_scrollable: Default::default(),
+                log,
             },
             Command::none(),
         )
@@ -369,20 +393,47 @@ impl Application for Ui {
                 Scene::CreateRepo {
                     name,
                     home,
+                    passphrase,
+                    passphrase2,
                     ref mut error,
                     ..
                 } => {
-                    if let Some(home) = home {
-                        self.config.repos.push(Repo {
-                            id: Uuid::new_v4(),
-                            name: name.clone(),
-                            home: home.clone(),
-                        });
-                        self.scene = Scene::overview(&self.config);
+                    if !name.is_empty() {
+                        if let Some(home) = home {
+                            if passphrase == passphrase2 {
+                                if let Err(e) = check_new_repo_dir(&home) {
+                                    *error = Some(e.to_string());
+                                    Command::none()
+                                } else {
+                                    self.config.repos.push(Repo {
+                                        id: Uuid::new_v4(),
+                                        name: name.clone(),
+                                        home: home.clone(),
+                                    });
+                                    let passphrase = passphrase.clone();
+                                    let log = self.log.clone();
+                                    let home = home.clone();
+                                    self.scene = Scene::overview(&self.config);
+                                    Command::perform(
+                                        async move {
+                                            rdedup::init(&home, Default::default(), passphrase, log)
+                                                .map(Redacted)
+                                        },
+                                        Message::RepoSaveResult,
+                                    )
+                                }
+                            } else {
+                                *error = Some("Passphrases don't match".to_string());
+                                Command::none()
+                            }
+                        } else {
+                            *error = Some("Home path must be set".to_string());
+                            Command::none()
+                        }
                     } else {
-                        *error = Some("Home path must be set".to_string());
+                        *error = Some("Name must be non-empty".to_string());
+                        Command::none()
                     }
-                    Command::none()
                 }
                 _ => Command::none(),
             },
@@ -396,6 +447,35 @@ impl Application for Ui {
                         *home = Some(path.clone());
                     }
                     s_home.update(msg).map(Message::RepoHome)
+                }
+                _ => Command::none(),
+            },
+            Message::SetPassphrase1(pass) => match &mut self.scene {
+                Scene::CreateRepo {
+                    ref mut passphrase, ..
+                } => {
+                    *passphrase = pass;
+                    Command::none()
+                }
+                _ => Command::none(),
+            },
+            Message::SetPassphrase2(pass) => match &mut self.scene {
+                Scene::CreateRepo {
+                    ref mut passphrase2,
+                    ..
+                } => {
+                    *passphrase2 = pass;
+                    Command::none()
+                }
+                _ => Command::none(),
+            },
+            Message::RepoSaveResult(result) => match &mut self.scene {
+                Scene::CreateRepo { ref mut error, .. } => {
+                    match result {
+                        Ok(repo) => (),
+                        Err(e) => *error = Some(e),
+                    }
+                    Command::none()
                 }
                 _ => Command::none(),
             },
@@ -487,11 +567,15 @@ impl Application for Ui {
             Scene::CreateRepo {
                 name,
                 home,
+                passphrase,
+                passphrase2,
                 error,
                 ref mut s_cancel_button,
                 ref mut s_save_button,
                 ref mut s_name,
                 ref mut s_home,
+                ref mut s_pass1,
+                ref mut s_pass2,
             } => Container::new(
                 Container::new(
                     Column::new()
@@ -512,9 +596,37 @@ impl Application for Ui {
                             ),
                         )
                         .push(
-                            Container::new(
-                                Row::new()
-                                    .spacing(10)
+                            TextInput::new(
+                                s_pass1,
+                                "Passphrase",
+                                &passphrase,
+                                Message::SetPassphrase1,
+                            )
+                            .password()
+                            .style(style::TextInput)
+                            .size(H3_SIZE),
+                        )
+                        .push(
+                            TextInput::new(
+                                s_pass2,
+                                "Confirm passphrase",
+                                &passphrase2,
+                                Message::SetPassphrase2,
+                            )
+                            .password()
+                            .style(style::TextInput)
+                            .size(H3_SIZE),
+                        )
+                        .push(
+                            Container::new({
+                                let mut row = Row::new().spacing(10);
+                                if let Some(error) = error {
+                                    row = row.push(
+                                        Text::new(error.as_str())
+                                            .color(Color::from_rgb(0.5, 0.0, 0.0)),
+                                    );
+                                }
+                                row = row
                                     .push(
                                         Button::new(
                                             s_cancel_button,
@@ -532,10 +644,10 @@ impl Application for Ui {
                                         .padding(8)
                                         .style(style::Button::Primary)
                                         .on_press(Message::SaveRepo),
-                                    ),
-                            )
-                            .width(Length::Fill)
-                            .align_x(Align::End),
+                                    );
+                                row
+                            })
+                            .width(Length::Fill), // .align_x(Align::End),
                         ),
                 )
                 .style(style::DialogContainer)
@@ -685,5 +797,24 @@ impl Drop for Ui {
         if let Err(e) = result {
             eprintln!("Error saving state: {}", e);
         }
+    }
+}
+#[derive(Clone)]
+pub struct Redacted<T>(pub T);
+impl<T> std::fmt::Debug for Redacted<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "<redacted>")
+    }
+}
+
+/// New repo directory must exist and be empty
+pub fn check_new_repo_dir(path: &Path) -> Result<(), std::io::Error> {
+    if path.read_dir()?.next().is_none() {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "Home directory must be empty",
+        ))
     }
 }
