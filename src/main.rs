@@ -511,8 +511,20 @@ impl Application for Ui {
                         .font(ICONS)
                         .width(Length::Units(150))
                         .style(style::Dropdown),
-                    )
-                    .push(button);
+                    );
+                if let Some(ref selected_repo) = self.config.selected_repo {
+                    // A bit verbose, getting the path of selected repo
+                    let repo = self
+                        .config
+                        .repos
+                        .iter()
+                        .find(|repo| Some(repo.id) == selected_repo.value.id());
+                    if let Some(repo) = repo {
+                        header = header.push(Text::new(repo.home.display().to_string()))
+                    }
+                }
+
+                header = header.push(button);
 
                 header = header.push(
                     Container::new(
