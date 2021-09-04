@@ -24,6 +24,8 @@ directories-next = "2"
 uuid = { version = "0.8.2", features = ["v4", "serde"] }
 ctrlc = "3"
 lazy_static = "1.4.0"
+chrono = "0.4.19"
+argon2 = "0.3.0"
 
 tokio = { version = "1.2", features = ["rt", "fs", "io-util", "time"] }
 

@@ -1,4 +1,9 @@
 #![feature(try_blocks)]
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
+use chrono::{DateTime, Utc};
 use iced::{button, pick_list, scrollable, text_input};
 use iced::{Align, Button, Column, Container, Element, PickList, Row, Scrollable, Text, TextInput};
 use iced::{
@@ -45,8 +50,8 @@ mod config {
     pub struct Config {
         pub repos: Vec<Repo>,
         pub targets: Vec<Target>,
-
         pub selected_repo: Option<Opt<RepoOption>>,
+        pub passphrase_hash: Option<String>,
     }
 
     #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -81,6 +86,13 @@ mod config {
         // TODO S3
         // TODO Syncthing?
     }
+}
+
+pub struct PreviousSnapshot {
+    /// Superfluous in some cases
+    pub name: String,
+    pub timestamp: DateTime<Utc>,
+    pub bytes: usize,
 }
 
 #[derive(Clone, Debug, Eq, Serialize, Deserialize)]
@@ -135,6 +147,15 @@ pub fn main() -> iced::Result {
 
 /// Application state for different scenes
 pub enum Scene {
+    Initial {
+        first_time: bool,
+        passphrase1: String,
+        passphrase2: String,
+        error: Option<String>,
+        s_pass1: text_input::State,
+        s_pass2: text_input::State,
+        s_confirm: button::State,
+    },
     Overview {
         list: Vec<ListItemState>,
         new_button: button::State,
@@ -149,16 +170,12 @@ pub enum Scene {
     CreateRepo {
         name: String,
         home: Option<PathBuf>,
-        passphrase: String,
-        passphrase2: String,
 
         error: Option<String>,
         s_cancel_button: button::State,
         s_save_button: button::State,
         s_name: text_input::State,
         s_home: FilePicker,
-        s_pass1: text_input::State,
-        s_pass2: text_input::State,
     },
     EditTarget {
         editor: TargetEditor,
@@ -169,6 +186,17 @@ pub enum Scene {
     },
 }
 impl Scene {
+    pub fn init(config_is_new: bool) -> Scene {
+        Scene::Initial {
+            first_time: config_is_new,
+            passphrase1: String::new(),
+            passphrase2: String::new(),
+            error: None,
+            s_pass1: Default::default(),
+            s_pass2: Default::default(),
+            s_confirm: Default::default(),
+        }
+    }
     pub fn overview(config: &Config) -> Scene {
         Scene::Overview {
             list: config
@@ -191,16 +219,12 @@ impl Scene {
         Scene::CreateRepo {
             name: String::new(),
             home: None,
-            passphrase: String::new(),
-            passphrase2: String::new(),
             error: None,
 
             s_cancel_button: Default::default(),
             s_save_button: Default::default(),
             s_name: Default::default(),
             s_home: Default::default(),
-            s_pass1: Default::default(),
-            s_pass2: Default::default(),
         }
     }
     pub fn edit(dir_index: usize, config: &Config) -> Scene {
@@ -222,6 +246,13 @@ pub struct Ui {
     scene: Scene,
     log: Logger,
     s_scrollable: scrollable::State,
+    /// Will always be set in the initial scene, and thus can be unwrapped in all other scenes
+    passphrase: Option<String>,
+    /// Current opened repo.
+    /// Optional: Error might occur when opening, and it won't be opened until inside Overview
+    repo: Option<rdedup_lib::Repo>,
+
+    argon2: Argon2<'static>,
 }
 
 #[derive(Debug, Clone)]
@@ -236,11 +267,14 @@ pub enum Message {
     OpenSettings,
     PickRepo(Opt<RepoOption>),
 
+    // Scene::Initial
+    SetPassphrase1(String),
+    SetPassphrase2(String),
+    InitialConfirm,
+
     // Repo editor (maybe make a new component)
     SetRepoName(String),
     SetRepoHome(PathBuf),
-    SetPassphrase1(String),
-    SetPassphrase2(String),
     SaveRepo,
     RepoHome(path::Message),
     RepoSaveResult(Result<Redacted<rdedup_lib::Repo>, String>),
@@ -251,10 +285,10 @@ impl Application for Ui {
     type Message = Message;
     type Flags = ();
     fn new(_flags: ()) -> (Self, Command<Message>) {
-        let config = if let Ok(config) = Config::load() {
-            config
+        let (config, config_is_new) = if let Ok(config) = Config::load() {
+            (config, false)
         } else {
-            Config::default()
+            (Config::default(), true)
         };
         let log = {
             use slog::*;
@@ -265,12 +299,16 @@ impl Application for Ui {
             let drain = Async::new(drain).build().fuse();
             Logger::root(drain, o!())
         };
+
         (
             Ui {
-                scene: Scene::overview(&config),
+                scene: Scene::init(config_is_new),
                 config,
                 s_scrollable: Default::default(),
                 log,
+                repo: None,
+                passphrase: None,
+                argon2: Argon2::default(),
             },
             Command::none(),
         )
@@ -375,6 +413,62 @@ impl Application for Ui {
                 }
                 Command::none()
             }
+
+            Message::SetPassphrase1(pass) => match &mut self.scene {
+                Scene::Initial {
+                    ref mut passphrase1,
+                    ..
+                } => {
+                    *passphrase1 = pass;
+                    Command::none()
+                }
+                _ => Command::none(),
+            },
+            Message::SetPassphrase2(pass) => match &mut self.scene {
+                Scene::Initial {
+                    ref mut passphrase2,
+                    ..
+                } => {
+                    *passphrase2 = pass;
+                    Command::none()
+                }
+                _ => Command::none(),
+            },
+            Message::InitialConfirm => match &mut self.scene {
+                Scene::Initial {
+                    ref passphrase1,
+                    ref passphrase2,
+                    ref mut error,
+                    first_time,
+                    ..
+                } => {
+                    if *first_time {
+                        if passphrase1 == passphrase2 {
+                            self.config.passphrase_hash =
+                                Some(hash_passphrase(&self.argon2, &passphrase1));
+                            self.passphrase = Some(passphrase1.clone());
+                            self.scene = Scene::overview(&self.config);
+                        } else {
+                            *error = Some("Passphrases don't match".to_string());
+                        }
+                    } else {
+                        let hash = PasswordHash::new(self.config.passphrase_hash.as_ref().unwrap())
+                            .unwrap();
+                        if self
+                            .argon2
+                            .verify_password(&passphrase1.as_bytes(), &hash)
+                            .is_ok()
+                        {
+                            self.passphrase = Some(passphrase1.clone());
+                            self.scene = Scene::overview(&self.config);
+                        } else {
+                            *error = Some("Wrong passphrase".to_string());
+                        }
+                    }
+                    Command::none()
+                }
+                _ => Command::none(),
+            },
             Message::SetRepoName(new_name) => match self.scene {
                 Scene::CreateRepo { ref mut name, .. } => {
                     *name = new_name;
@@ -393,38 +487,31 @@ impl Application for Ui {
                 Scene::CreateRepo {
                     name,
                     home,
-                    passphrase,
-                    passphrase2,
                     ref mut error,
                     ..
                 } => {
                     if !name.is_empty() {
                         if let Some(home) = home {
-                            if passphrase == passphrase2 {
-                                if let Err(e) = check_new_repo_dir(&home) {
-                                    *error = Some(e.to_string());
-                                    Command::none()
-                                } else {
-                                    self.config.repos.push(Repo {
-                                        id: Uuid::new_v4(),
-                                        name: name.clone(),
-                                        home: home.clone(),
-                                    });
-                                    let passphrase = passphrase.clone();
-                                    let log = self.log.clone();
-                                    let home = home.clone();
-                                    self.scene = Scene::overview(&self.config);
-                                    Command::perform(
-                                        async move {
-                                            rdedup::init(&home, Default::default(), passphrase, log)
-                                                .map(Redacted)
-                                        },
-                                        Message::RepoSaveResult,
-                                    )
-                                }
-                            } else {
-                                *error = Some("Passphrases don't match".to_string());
+                            if let Err(e) = check_new_repo_dir(home) {
+                                *error = Some(e.to_string());
                                 Command::none()
+                            } else {
+                                self.config.repos.push(Repo {
+                                    id: Uuid::new_v4(),
+                                    name: name.clone(),
+                                    home: home.clone(),
+                                });
+                                let passphrase = self.passphrase.clone().unwrap();
+                                let log = self.log.clone();
+                                let home = home.clone();
+                                self.scene = Scene::overview(&self.config);
+                                Command::perform(
+                                    async move {
+                                        rdedup::init(&home, Default::default(), passphrase, log)
+                                            .map(Redacted)
+                                    },
+                                    Message::RepoSaveResult,
+                                )
                             }
                         } else {
                             *error = Some("Home path must be set".to_string());
@@ -450,25 +537,6 @@ impl Application for Ui {
                 }
                 _ => Command::none(),
             },
-            Message::SetPassphrase1(pass) => match &mut self.scene {
-                Scene::CreateRepo {
-                    ref mut passphrase, ..
-                } => {
-                    *passphrase = pass;
-                    Command::none()
-                }
-                _ => Command::none(),
-            },
-            Message::SetPassphrase2(pass) => match &mut self.scene {
-                Scene::CreateRepo {
-                    ref mut passphrase2,
-                    ..
-                } => {
-                    *passphrase2 = pass;
-                    Command::none()
-                }
-                _ => Command::none(),
-            },
             Message::RepoSaveResult(result) => match &mut self.scene {
                 Scene::CreateRepo { ref mut error, .. } => {
                     match result {
@@ -484,6 +552,44 @@ impl Application for Ui {
 
     fn view(&mut self) -> Element<Message> {
         let w: Container<Message> = match &mut self.scene {
+            Scene::Initial {
+                first_time,
+                passphrase1,
+                passphrase2,
+                s_pass1,
+                s_pass2,
+                s_confirm,
+                error,
+            } => Container::new({
+                let mut column = Column::new().padding(20).spacing(20).push(
+                    TextInput::new(s_pass1, "Passphrase", passphrase1, Message::SetPassphrase1)
+                        .password()
+                        .style(style::TextInput)
+                        .size(H3_SIZE),
+                );
+                if *first_time {
+                    column = column.push(
+                        TextInput::new(
+                            s_pass2,
+                            "Confirm passphrase",
+                            passphrase2,
+                            Message::SetPassphrase2,
+                        )
+                        .password()
+                        .style(style::TextInput)
+                        .size(H3_SIZE),
+                    );
+                }
+                let button = Button::new(s_confirm, Text::new("CONFIRM").size(TEXT_SIZE))
+                    .on_press(Message::InitialConfirm);
+
+                column = column.push(button);
+                if let Some(error) = error {
+                    column = column
+                        .push(Text::new(error.as_str()).color(Color::from_rgb(0.5, 0.0, 0.0)));
+                }
+                column
+            }),
             Scene::Overview {
                 list,
                 new_button,
@@ -579,15 +685,11 @@ impl Application for Ui {
             Scene::CreateRepo {
                 name,
                 home,
-                passphrase,
-                passphrase2,
                 error,
                 ref mut s_cancel_button,
                 ref mut s_save_button,
                 ref mut s_name,
                 ref mut s_home,
-                ref mut s_pass1,
-                ref mut s_pass2,
             } => Container::new(
                 Container::new(
                     Column::new()
@@ -606,28 +708,6 @@ impl Application for Ui {
                                     .view(home.as_ref().map(|x| x.as_path()), TEXT_SIZE)
                                     .map(Message::RepoHome),
                             ),
-                        )
-                        .push(
-                            TextInput::new(
-                                s_pass1,
-                                "Passphrase",
-                                &passphrase,
-                                Message::SetPassphrase1,
-                            )
-                            .password()
-                            .style(style::TextInput)
-                            .size(H3_SIZE),
-                        )
-                        .push(
-                            TextInput::new(
-                                s_pass2,
-                                "Confirm passphrase",
-                                &passphrase2,
-                                Message::SetPassphrase2,
-                            )
-                            .password()
-                            .style(style::TextInput)
-                            .size(H3_SIZE),
                         )
                         .push(
                             Container::new({
@@ -829,4 +909,12 @@ pub fn check_new_repo_dir(path: &Path) -> Result<(), std::io::Error> {
             "Home directory must be empty",
         ))
     }
+}
+
+fn hash_passphrase(argon2: &Argon2<'static>, passphrase: &str) -> String {
+    let salt = SaltString::generate(&mut OsRng);
+    argon2
+        .hash_password(passphrase.as_bytes(), &salt)
+        .unwrap()
+        .to_string()
 }
