@@ -1,4 +1,5 @@
 #![feature(try_blocks)]
+use anyhow::Context;
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
@@ -9,18 +10,22 @@ use iced::{Align, Button, Column, Container, Element, PickList, Row, Scrollable,
 use iced::{
     Application, Color, Command, Font, HorizontalAlignment, Length, Settings, Subscription,
 };
+use indexmap::IndexMap;
 use itertools::izip;
+use rdedup_lib::Repo;
 use serde::{Deserialize, Serialize};
-use slog::Logger;
+use slog::{error, info, Logger};
 use std::{
     path::{Path, PathBuf},
-    sync::{atomic::AtomicBool, Arc},
+    sync::atomic::AtomicBool,
     time::{Duration, Instant},
 };
+use url::Url;
 use uuid::Uuid;
 
 mod ext;
 mod icon;
+mod log;
 mod path;
 mod rdedup;
 mod style;
@@ -48,19 +53,40 @@ mod config {
     use super::*;
     #[derive(Clone, Debug, Serialize, Deserialize, Default)]
     pub struct Config {
-        pub repos: Vec<Repo>,
-        pub targets: Vec<Target>,
+        pub repos: IndexMap<Uuid, RepoConfig>,
         pub selected_repo: Option<Opt<RepoOption>>,
         pub passphrase_hash: Option<String>,
     }
+    impl Config {
+        pub fn selected_repo_mut(&mut self) -> Option<&mut RepoConfig> {
+            if let Some(ref selected_repo) = self.selected_repo {
+                if let Some(id) = selected_repo.value.id() {
+                    self.repos.get_mut(&id)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        pub fn selected_repo(&self) -> Option<&RepoConfig> {
+            self.selected_repo
+                .as_ref()
+                .and_then(|selected| selected.value.id().and_then(|id| self.repos.get(&id)))
+        }
+        pub fn find_repo(&self, id: Uuid) -> Option<&RepoConfig> {
+            self.repos.get(&id)
+        }
+    }
 
     #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-    pub struct Repo {
+    pub struct RepoConfig {
         /// Needs a unique ID, since it's linked to by Targets, and the name (and maybe home) can
         /// be changed.
         pub id: Uuid,
         pub name: String,
         pub home: PathBuf,
+        pub targets: Vec<Target>,
         // pub settings: RepoSettings,
     }
 
@@ -125,12 +151,12 @@ impl RepoOption {
     }
 }
 
-fn repo_options(repos: &[config::Repo]) -> Vec<Opt<RepoOption>> {
+fn repo_options<'a, I: Iterator<Item = &'a RepoConfig>>(repos: I) -> Vec<Opt<RepoOption>> {
     std::iter::once(Opt {
         name: "New repo...".to_string(),
         value: RepoOption::New,
     })
-    .chain(repos.iter().map(|repo| Opt {
+    .chain(repos.map(|repo| Opt {
         name: format!("{} {}", Icon::Repo, repo.name),
         value: RepoOption::Select(repo.id),
     }))
@@ -148,7 +174,6 @@ pub fn main() -> iced::Result {
 /// Application state for different scenes
 pub enum Scene {
     Initial {
-        first_time: bool,
         passphrase1: String,
         passphrase2: String,
         error: Option<String>,
@@ -179,16 +204,15 @@ pub enum Scene {
     },
     EditTarget {
         editor: TargetEditor,
-        dir_index: usize,
+        target_index: usize,
     },
     Settings {
         s_back_button: button::State,
     },
 }
 impl Scene {
-    pub fn init(config_is_new: bool) -> Scene {
+    pub fn init() -> Scene {
         Scene::Initial {
-            first_time: config_is_new,
             passphrase1: String::new(),
             passphrase2: String::new(),
             error: None,
@@ -198,19 +222,17 @@ impl Scene {
         }
     }
     pub fn overview(config: &Config) -> Scene {
+        let repo = config.selected_repo();
+        let n_targets = repo.map(|repo| repo.targets.len()).unwrap_or(0);
         Scene::Overview {
-            list: config
-                .targets
-                .iter()
-                .map(|_| ListItemState::default())
-                .collect(),
+            list: Vec::new(),
             new_button: Default::default(),
             selected_target: None,
             s_open_settings: Default::default(),
             s_repo_pick_list: Default::default(),
         }
     }
-    pub fn create_directory(repo_id: Uuid) -> Scene {
+    pub fn create_target(repo_id: Uuid) -> Scene {
         Scene::CreateTarget {
             editor: TargetEditor::new_target(repo_id),
         }
@@ -227,11 +249,11 @@ impl Scene {
             s_home: Default::default(),
         }
     }
-    pub fn edit(dir_index: usize, config: &Config) -> Scene {
-        let dir = config.targets[dir_index].clone();
+    pub fn edit(target_index: usize, config: &Config) -> Scene {
+        let target = config.selected_repo().unwrap().targets[target_index].clone();
         Scene::EditTarget {
-            editor: TargetEditor::with_target(dir),
-            dir_index,
+            editor: TargetEditor::with_target(target),
+            target_index,
         }
     }
     pub fn settings() -> Scene {
@@ -250,7 +272,7 @@ pub struct Ui {
     passphrase: Option<String>,
     /// Current opened repo.
     /// Optional: Error might occur when opening, and it won't be opened until inside Overview
-    repo: Option<rdedup_lib::Repo>,
+    repo: Option<Repo>,
 
     argon2: Argon2<'static>,
 }
@@ -260,8 +282,8 @@ pub enum Message {
     /// Only used to check if application should exit
     Tick(Instant),
     ToOverview,
-    NewDir,
-    EditDir(usize),
+    NewTarget,
+    EditTarget(usize),
     ListItem(usize, ListItemMessage),
     TargetEditor(TargetEditorMessage),
     OpenSettings,
@@ -277,7 +299,28 @@ pub enum Message {
     SetRepoHome(PathBuf),
     SaveRepo,
     RepoHome(path::Message),
-    RepoSaveResult(Result<Redacted<rdedup_lib::Repo>, String>),
+    RepoSaveResult(Result<Redacted<Repo>, String>),
+}
+
+pub fn init_repo(path: &Path, passphrase: String, log: Logger) -> anyhow::Result<Repo> {
+    let url = Url::from_directory_path(path)
+        .ok()
+        .context("RDEDUP_DIR url from path")?;
+    if path.read_dir()?.next().is_none() {
+        let passphrase = passphrase;
+        info!(log, "Initialize repo {:?}", url);
+        Repo::init(
+            &url,
+            &move || Ok(passphrase.clone()),
+            RepoSettings::default(),
+            log.clone(),
+        )
+        .context("Initialing Rdedup Repo")
+    } else {
+        // Is it an already existing repo?
+        info!(log, "Open existing repo {:?}", url);
+        Repo::open(&url, log.clone()).context("Opening existing Rdedup Repo")
+    }
 }
 
 impl Application for Ui {
@@ -285,24 +328,14 @@ impl Application for Ui {
     type Message = Message;
     type Flags = ();
     fn new(_flags: ()) -> (Self, Command<Message>) {
-        let (config, config_is_new) = if let Ok(config) = Config::load() {
-            (config, false)
-        } else {
-            (Config::default(), true)
-        };
-        let log = {
-            use slog::*;
-            use slog_async::*;
-            use slog_term::*;
-            let decorator = TermDecorator::new().build();
-            let drain = FullFormat::new(decorator).build().fuse();
-            let drain = Async::new(drain).build().fuse();
-            Logger::root(drain, o!())
-        };
+        let config = Config::load()
+            .context("Could not deserialize config file")
+            .unwrap();
 
+        let log = log::logger();
         (
             Ui {
-                scene: Scene::init(config_is_new),
+                scene: Scene::init(),
                 config,
                 s_scrollable: Default::default(),
                 log,
@@ -332,17 +365,17 @@ impl Application for Ui {
                 self.scene = Scene::overview(&self.config);
                 Command::none()
             }
-            Message::NewDir => {
+            Message::NewTarget => {
                 if let Some(Opt {
                     value: RepoOption::Select(repo_id),
                     ..
                 }) = self.config.selected_repo
                 {
-                    self.scene = Scene::create_directory(repo_id);
+                    self.scene = Scene::create_target(repo_id);
                 }
                 Command::none()
             }
-            Message::EditDir(index) => {
+            Message::EditTarget(index) => {
                 self.scene = Scene::edit(index, &self.config);
                 Command::none()
             }
@@ -373,21 +406,30 @@ impl Application for Ui {
             Message::TargetEditor(msg) => {
                 match msg {
                     TargetEditorMessage::Save => {
-                        match &self.scene {
-                            Scene::CreateTarget { editor } => {
-                                if let Ok(()) = verify_target(&editor.target) {
-                                    self.config.targets.push(editor.target.clone());
-                                    self.scene = Scene::overview(&self.config);
-                                }
-                            }
-                            Scene::EditTarget { editor, dir_index } => {
-                                if let Ok(()) = verify_target(&editor.target) {
-                                    self.config.targets[*dir_index] = editor.target.clone();
-                                    self.scene = Scene::overview(&self.config);
-                                }
-                            }
+                        // Easier to do the pattern matching on scene first, due to the need of
+                        // capturing `target_index` optionally. (ran into borrowing issues)
+                        let (editor, target_index) = match &mut self.scene {
+                            Scene::CreateTarget { ref mut editor } => (Some(editor), None),
+                            Scene::EditTarget {
+                                ref mut editor,
+                                target_index,
+                            } => (Some(editor), Some(target_index)),
                             _ => panic!(),
                         };
+                        if let Some(editor) = editor {
+                            match verify_target(&editor.target) {
+                                Ok(()) => {
+                                    let repo = self.config.selected_repo_mut().unwrap();
+                                    if let Some(target_index) = target_index {
+                                        repo.targets[*target_index] = editor.target.clone();
+                                    } else {
+                                        repo.targets.push(editor.target.clone());
+                                    }
+                                    self.scene = Scene::overview(&self.config);
+                                }
+                                Err(e) => editor.error = Some(e),
+                            }
+                        }
                     }
                     TargetEditorMessage::Cancel => {
                         self.scene = Scene::overview(&self.config);
@@ -409,7 +451,26 @@ impl Application for Ui {
             Message::PickRepo(repo) => {
                 match repo.value {
                     RepoOption::New => self.scene = Scene::create_repo(),
-                    RepoOption::Select(_) => self.config.selected_repo = Some(repo),
+                    RepoOption::Select(id) => {
+                        // Find repo in config
+
+                        let result: anyhow::Result<()> = try {
+                            let repo_config =
+                                self.config.find_repo(id).context("Cannot find repo")?;
+
+                            let url = &Url::from_directory_path(&repo_config.home)
+                                .map_err(|()| anyhow::Error::msg("Url->Path"))?;
+                            info!(self.log, "Opening repo at {}", url);
+
+                            let repo = Repo::open(url, self.log.clone())?;
+                            self.repo = Some(repo);
+                        };
+
+                        match result {
+                            Ok(()) => self.config.selected_repo = Some(repo),
+                            Err(e) => error!(self.log, "[User error] {:#?}", e),
+                        }
+                    }
                 }
                 Command::none()
             }
@@ -439,21 +500,10 @@ impl Application for Ui {
                     ref passphrase1,
                     ref passphrase2,
                     ref mut error,
-                    first_time,
                     ..
                 } => {
-                    if *first_time {
-                        if passphrase1 == passphrase2 {
-                            self.config.passphrase_hash =
-                                Some(hash_passphrase(&self.argon2, &passphrase1));
-                            self.passphrase = Some(passphrase1.clone());
-                            self.scene = Scene::overview(&self.config);
-                        } else {
-                            *error = Some("Passphrases don't match".to_string());
-                        }
-                    } else {
-                        let hash = PasswordHash::new(self.config.passphrase_hash.as_ref().unwrap())
-                            .unwrap();
+                    if let Some(ref passphrase_hash) = self.config.passphrase_hash {
+                        let hash = PasswordHash::new(&passphrase_hash).unwrap();
                         if self
                             .argon2
                             .verify_password(&passphrase1.as_bytes(), &hash)
@@ -463,6 +513,15 @@ impl Application for Ui {
                             self.scene = Scene::overview(&self.config);
                         } else {
                             *error = Some("Wrong passphrase".to_string());
+                        }
+                    } else {
+                        if passphrase1 == passphrase2 {
+                            self.config.passphrase_hash =
+                                Some(hash_passphrase(&self.argon2, &passphrase1));
+                            self.passphrase = Some(passphrase1.clone());
+                            self.scene = Scene::overview(&self.config);
+                        } else {
+                            *error = Some("Passphrases don't match".to_string());
                         }
                     }
                     Command::none()
@@ -492,26 +551,34 @@ impl Application for Ui {
                 } => {
                     if !name.is_empty() {
                         if let Some(home) = home {
-                            if let Err(e) = check_new_repo_dir(home) {
-                                *error = Some(e.to_string());
-                                Command::none()
-                            } else {
-                                self.config.repos.push(Repo {
-                                    id: Uuid::new_v4(),
-                                    name: name.clone(),
-                                    home: home.clone(),
-                                });
-                                let passphrase = self.passphrase.clone().unwrap();
-                                let log = self.log.clone();
-                                let home = home.clone();
-                                self.scene = Scene::overview(&self.config);
-                                Command::perform(
-                                    async move {
-                                        rdedup::init(&home, Default::default(), passphrase, log)
-                                            .map(Redacted)
-                                    },
-                                    Message::RepoSaveResult,
-                                )
+                            match init_repo(
+                                home,
+                                self.passphrase.clone().unwrap(),
+                                self.log.clone(),
+                            ) {
+                                Ok(repo) => {
+                                    self.repo = Some(repo);
+                                    let id = Uuid::new_v4();
+                                    self.config.repos.insert(
+                                        id,
+                                        RepoConfig {
+                                            id,
+                                            name: name.clone(),
+                                            home: home.clone(),
+                                            targets: Default::default(),
+                                        },
+                                    );
+                                    self.config.selected_repo = Some(Opt {
+                                        name: name.clone(),
+                                        value: RepoOption::Select(id),
+                                    });
+                                    self.scene = Scene::overview(&self.config);
+                                    Command::none()
+                                }
+                                Err(e) => {
+                                    *error = Some(e.to_string());
+                                    Command::none()
+                                }
                             }
                         } else {
                             *error = Some("Home path must be set".to_string());
@@ -540,7 +607,7 @@ impl Application for Ui {
             Message::RepoSaveResult(result) => match &mut self.scene {
                 Scene::CreateRepo { ref mut error, .. } => {
                     match result {
-                        Ok(repo) => (),
+                        Ok(repo) => (), // TODO??
                         Err(e) => *error = Some(e),
                     }
                     Command::none()
@@ -551,9 +618,9 @@ impl Application for Ui {
     }
 
     fn view(&mut self) -> Element<Message> {
+        let config = &self.config;
         let w: Container<Message> = match &mut self.scene {
             Scene::Initial {
-                first_time,
                 passphrase1,
                 passphrase2,
                 s_pass1,
@@ -567,7 +634,7 @@ impl Application for Ui {
                         .style(style::TextInput)
                         .size(H3_SIZE),
                 );
-                if *first_time {
+                if self.config.passphrase_hash.is_none() {
                     column = column.push(
                         TextInput::new(
                             s_pass2,
@@ -597,12 +664,12 @@ impl Application for Ui {
                 s_open_settings,
                 s_repo_pick_list,
             } => {
-                let repo_options = repo_options(&self.config.repos);
+                let repo_options = repo_options(self.config.repos.values());
 
                 let mut button = Button::new(new_button, Text::new("NEW BUP").size(TEXT_SIZE - 4))
                     .style(style::Button::Primary);
                 if self.config.selected_repo.is_some() {
-                    button = button.on_press(Message::NewDir);
+                    button = button.on_press(Message::NewTarget);
                 }
                 let mut header = Row::new()
                     .spacing(20)
@@ -620,11 +687,8 @@ impl Application for Ui {
                     );
                 if let Some(ref selected_repo) = self.config.selected_repo {
                     // A bit verbose, getting the path of selected repo
-                    let repo = self
-                        .config
-                        .repos
-                        .iter()
-                        .find(|repo| Some(repo.id) == selected_repo.value.id());
+                    //
+                    let repo = selected_repo.value.id().and_then(|id| config.find_repo(id));
                     if let Some(repo) = repo {
                         header = header.push(Text::new(repo.home.display().to_string()))
                     }
@@ -647,24 +711,15 @@ impl Application for Ui {
                     .align_x(Align::End),
                 );
 
-                let selected_repo_id = self
-                    .config
-                    .selected_repo
-                    .clone()
-                    .and_then(|opt| opt.value.id());
                 let mut overview: Column<Message> = Column::new().spacing(20);
-                for (i, (target, state)) in
-                    self.config.targets.iter().zip(list.iter_mut()).enumerate()
-                {
-                    if let Some(selected_repo_id) = selected_repo_id {
-                        if selected_repo_id == target.repo {
-                            let is_selected = selected_target.map(|s| s == i).unwrap_or(false);
-                            overview = overview.push(
-                                state
-                                    .view(&target, is_selected)
-                                    .map(move |msg| Message::ListItem(i, msg)),
-                            );
-                        }
+                if let Some(repo) = self.config.selected_repo() {
+                    for (i, (target, state)) in zip_list(&repo.targets, list).enumerate() {
+                        let is_selected = selected_target.map(|s| s == i).unwrap_or(false);
+                        overview = overview.push(
+                            state
+                                .view(&target, is_selected)
+                                .map(move |msg| Message::ListItem(i, msg)),
+                        );
                     }
                 }
 
@@ -711,14 +766,8 @@ impl Application for Ui {
                         )
                         .push(
                             Container::new({
-                                let mut row = Row::new().spacing(10);
-                                if let Some(error) = error {
-                                    row = row.push(
-                                        Text::new(error.as_str())
-                                            .color(Color::from_rgb(0.5, 0.0, 0.0)),
-                                    );
-                                }
-                                row = row
+                                let mut row = Row::new()
+                                    .spacing(10)
                                     .push(
                                         Button::new(
                                             s_cancel_button,
@@ -737,6 +786,12 @@ impl Application for Ui {
                                         .style(style::Button::Primary)
                                         .on_press(Message::SaveRepo),
                                     );
+                                if let Some(error) = error {
+                                    row = row.push(
+                                        Text::new(format!("Error: {}", error.as_str()))
+                                            .color(Color::from_rgb(0.5, 0.0, 0.0)),
+                                    );
+                                }
                                 row
                             })
                             .width(Length::Fill), // .align_x(Align::End),
@@ -775,12 +830,12 @@ pub struct ListItemState {
     s_button2: button::State,
 }
 impl ListItemState {
-    pub fn view(&mut self, dir: &Target, selected: bool) -> Element<ListItemMessage> {
+    pub fn view(&mut self, target: &Target, selected: bool) -> Element<ListItemMessage> {
         let header = Row::new()
             .height(Length::Units(36))
             .width(Length::Fill)
             .push(
-                Container::new(Text::new(&dir.name).size(TEXT_SIZE))
+                Container::new(Text::new(&target.name).size(TEXT_SIZE))
                     .align_y(Align::Center)
                     .align_x(Align::Start)
                     .width(Length::Fill)
@@ -822,19 +877,19 @@ pub enum ListItemMessage {
     Edit,
 }
 
-fn verify_target(dir: &Target) -> Result<(), String> {
-    if dir.name.is_empty() {
+fn verify_target(target: &Target) -> Result<(), String> {
+    if target.name.is_empty() {
         return Err("Name should not be empty".to_string());
     }
-    if dir.sources.is_empty() {
+    if target.sources.is_empty() {
         return Err("Should have at least one source".to_string());
     }
-    for source in &dir.sources {
+    for source in &target.sources {
         if source.is_none() {
             return Err("All sources should have a path".to_string());
         }
     }
-    for exclude in &dir.excludes {
+    for exclude in &target.excludes {
         if exclude.is_empty() {
             return Err("No exclude should be empty".to_string());
         }
@@ -857,10 +912,12 @@ fn config_path() -> std::path::PathBuf {
 }
 
 impl Config {
+    /// bool: true if config was newly created
     pub fn load() -> anyhow::Result<Self> {
-        let contents = std::fs::read_to_string(config_path())?;
-
-        Ok(serde_json::from_str(&contents)?)
+        match std::fs::read_to_string(config_path()) {
+            Ok(contents) => Ok(serde_json::from_str(&contents)?),
+            Err(_) => Ok(Config::default()),
+        }
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
@@ -899,22 +956,22 @@ impl<T> std::fmt::Debug for Redacted<T> {
     }
 }
 
-/// New repo directory must exist and be empty
-pub fn check_new_repo_dir(path: &Path) -> Result<(), std::io::Error> {
-    if path.read_dir()?.next().is_none() {
-        Ok(())
-    } else {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "Home directory must be empty",
-        ))
-    }
-}
-
 fn hash_passphrase(argon2: &Argon2<'static>, passphrase: &str) -> String {
     let salt = SaltString::generate(&mut OsRng);
     argon2
         .hash_password(passphrase.as_bytes(), &salt)
         .unwrap()
         .to_string()
+}
+
+fn zip_list<'a, T, I, S>(data: I, state: &'a mut Vec<S>) -> impl Iterator<Item = (T, &mut S)> + 'a
+where
+    I: IntoIterator<Item = T> + Clone,
+    <I as IntoIterator>::IntoIter: 'a,
+    S: Default + Clone,
+{
+    // Ensure that we have enough state elements
+    state.resize(data.clone().into_iter().count(), S::default());
+
+    data.into_iter().zip(state)
 }

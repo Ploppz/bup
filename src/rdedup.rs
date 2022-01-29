@@ -1,3 +1,4 @@
+use anyhow::Context;
 use rdedup_lib::{settings::Repo as RepoSettings, Repo};
 use slog::Logger;
 use std::path::Path;
@@ -8,8 +9,10 @@ pub fn init(
     settings: RepoSettings,
     passphrase: String,
     log: Logger,
-) -> Result<Repo, String> {
-    let url = Url::from_file_path(path).map_err(|()| "RDEDUP_DIR url from path".to_string())?;
+) -> anyhow::Result<Repo> {
+    let url = Url::from_directory_path(path)
+        .ok()
+        .context("RDEDUP_DIR url from path")?;
     Repo::init(&url, &move || Ok(passphrase.clone()), settings, log)
-        .map_err(|_| "Initialing Rdedup Repo".to_string())
+        .context("Initialing Rdedup Repo")
 }
