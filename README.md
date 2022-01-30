@@ -1,3 +1,7 @@
+# Compiling in Ubuntu
+```
+sudo apt install libclang-dev libsodium-dev libssl-dev libgtk-3-dev pkg-config liblzma-dev build-essential
+```
 # Request for code review
 
 This is a minimal start of a UI project with `iced`.
