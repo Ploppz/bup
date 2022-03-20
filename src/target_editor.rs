@@ -200,7 +200,7 @@ impl TargetEditor {
                         ),
                 )
                 .width(Length::Fill)
-                .align_x(Align::End),
+                .align_x(Horizontal::Right),
             );
         if let Some(ref error) = self.error {
             x = x.push(Text::new(error).color(Color::from_rgb(0.5, 0.0, 0.0)))

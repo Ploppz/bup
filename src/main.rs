@@ -5,11 +5,10 @@ use argon2::{
     Argon2,
 };
 use chrono::{DateTime, Utc};
+use iced::alignment::{Horizontal, Vertical};
 use iced::{button, pick_list, scrollable, text_input};
-use iced::{Align, Button, Column, Container, Element, PickList, Row, Scrollable, Text, TextInput};
-use iced::{
-    Application, Color, Command, Font, HorizontalAlignment, Length, Settings, Subscription,
-};
+use iced::{Application, Color, Command, Font, Length, Settings, Subscription};
+use iced::{Button, Column, Container, Element, PickList, Row, Scrollable, Text, TextInput};
 use indexmap::IndexMap;
 use itertools::izip;
 use rdedup_lib::Repo;
@@ -324,7 +323,7 @@ pub fn init_repo(path: &Path, passphrase: String, log: Logger) -> anyhow::Result
 }
 
 impl Application for Ui {
-    type Executor = iced_native::executor::Tokio;
+    type Executor = iced::executor::Default;
     type Message = Message;
     type Flags = ();
     fn new(_flags: ()) -> (Self, Command<Message>) {
@@ -358,7 +357,7 @@ impl Application for Ui {
         String::from("Ui - Iced")
     }
 
-    fn update(&mut self, message: Message, _clip: &mut iced::Clipboard) -> Command<Message> {
+    fn update(&mut self, message: Message) -> Command<Message> {
         match message {
             Message::Tick(_) => Command::none(),
             Message::ToOverview => {
@@ -708,7 +707,7 @@ impl Application for Ui {
                         ),
                     )
                     .width(Length::Fill)
-                    .align_x(Align::End),
+                    .align_x(Horizontal::Right),
                 );
 
                 let mut overview: Column<Message> = Column::new().spacing(20);
@@ -733,7 +732,7 @@ impl Application for Ui {
                 // Center the editor
                 Container::new(editor.view().map(Message::TargetEditor))
                     .padding(50)
-                    .align_x(Align::Center)
+                    .align_x(Horizontal::Center)
                     .width(Length::Fill)
                     .height(Length::Fill)
             }
@@ -794,7 +793,7 @@ impl Application for Ui {
                                 }
                                 row
                             })
-                            .width(Length::Fill), // .align_x(Align::End),
+                            .width(Length::Fill), // .align_x(Horizontal::End),
                         ),
                 )
                 .style(style::DialogContainer)
@@ -803,7 +802,7 @@ impl Application for Ui {
                 .height(Length::Shrink),
             )
             .padding(50)
-            .align_x(Align::Center)
+            .align_x(Horizontal::Center)
             .width(Length::Fill)
             .height(Length::Fill),
             Scene::Settings { s_back_button } => Container::new(
@@ -836,8 +835,8 @@ impl ListItemState {
             .width(Length::Fill)
             .push(
                 Container::new(Text::new(&target.name).size(TEXT_SIZE))
-                    .align_y(Align::Center)
-                    .align_x(Align::Start)
+                    .align_y(Vertical::Center)
+                    .align_x(Horizontal::Left)
                     .width(Length::Fill)
                     .height(Length::Fill),
             )
@@ -850,7 +849,7 @@ impl ListItemState {
                         })
                         .on_press(ListItemMessage::Edit),
                 )
-                .align_x(Align::End)
+                .align_x(Horizontal::Right)
                 .width(Length::Fill),
             );
         let mut column = Column::new();

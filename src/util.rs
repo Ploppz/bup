@@ -6,7 +6,7 @@ pub const ICONS: Font = Font::External {
     bytes: include_bytes!("../fonts/agave.ttf"),
 };
 
-pub  fn icon(unicode: char) -> Text {
+pub fn icon(unicode: char) -> Text {
     Text::new(&unicode.to_string())
         .font(ICONS)
         .width(Length::Units(TEXT_SIZE))
@@ -27,5 +27,5 @@ pub fn h3<T: Into<String>>(text: T) -> Text {
     Text::new(text)
         .size(22)
         .color([0.7, 0.7, 0.7])
-        .horizontal_alignment(HorizontalAlignment::Center)
+        .horizontal_alignment(Horizontal::Center)
 }
